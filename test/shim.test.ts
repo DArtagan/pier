@@ -19,6 +19,7 @@ import {
 	defineExtension,
 	defineTool,
 	Harness,
+	LiveDoc,
 	MemoryStorage,
 	ProviderDoc,
 	section,
@@ -33,6 +34,8 @@ type Respond = (call: Call) => AssistantMessage | "hang";
 interface Call {
 	context: Context;
 	options: SimpleStreamOptions | undefined;
+	/** Whether the signal the bridge got was already aborted when it was called. */
+	abortedAtCall: boolean;
 }
 
 /** Records what the bridge would see, and answers from a script. */
@@ -64,7 +67,7 @@ function fakeBridge(toBridgeContext: LoadedBridge["toBridgeContext"], respond: R
 				},
 			],
 			streamSimple: (_model: unknown, transcript: Context, options?: SimpleStreamOptions) => {
-				const call = { context: transcript, options };
+				const call = { context: transcript, options, abortedAtCall: options?.signal?.aborted === true };
 				calls.push(call);
 				const stream = createAssistantMessageEventStream();
 				const answer = respond(call);
@@ -101,6 +104,17 @@ const noop = defineTool({
 	execute: async () => ({ output: [{ type: "text", text: "ok" }] }),
 });
 
+/** Runs until its call is aborted, like a long bash command the user gives up on. */
+const wait = defineTool({
+	name: "wait",
+	description: "Waits until aborted",
+	parameters: Type.Object({}),
+	execute: (_args, _api, context) =>
+		new Promise((resolve) =>
+			context.abortSignal?.addEventListener("abort", () => resolve({ output: [{ type: "text", text: "aborted" }] })),
+		),
+});
+
 describe("bridge shim", () => {
 	let dir: string;
 	let toBridgeContext: LoadedBridge["toBridgeContext"];
@@ -133,12 +147,13 @@ describe("bridge shim", () => {
 		});
 		const registry = createRegistry();
 		registry.install(
-			defineExtension({ name: "tools", tools: [noop], sections: [section("cwd", (input) => input.agent.cwd)] }),
+			defineExtension({ name: "tools", tools: [noop, wait], sections: [section("cwd", (input) => input.agent.cwd)] }),
 		);
 		registry.install(shim.extension);
 		// Small enough that three short turns leave something to compact.
 		const settings = { compaction: { keepRecentTokens: 1 } };
 		harness = await Harness.open(new MemoryStorage(), { models, registry, settings }, context);
+		shim.attach(harness);
 		const root = await harness.root(context, {
 			agent: { model: { provider: "fake-bridge", modelId: "fake" }, cwd: dir },
 		});
@@ -191,10 +206,12 @@ describe("bridge shim", () => {
 		expect((await ask(root, "use the tool")).status).toBe("done");
 		expect(calls).toHaveLength(2);
 		const [first, second] = calls.map((call) => call.options?.signal);
-		// The same signal a parked Claude Code query listens on, unaborted after the
-		// request that created it ended its task invocation.
+		// The same signal a parked Claude Code query listens on, still unaborted when the
+		// tool result arrives, though the request that created it ended its task invocation.
 		expect(second).toBe(first);
-		expect(first?.aborted).toBe(false);
+		expect(calls[1]?.abortedAtCall).toBe(false);
+		// The run is over now, and so is its signal.
+		expect(first?.aborted).toBe(true);
 	});
 
 	it("forwards a real abort to the bridge", async () => {
@@ -203,6 +220,24 @@ describe("bridge shim", () => {
 		await expect.poll(() => calls.length).toBe(1);
 		await root.abort(context);
 		expect(calls[0]?.options?.signal?.aborted).toBe(true);
+	});
+
+	it("forwards an abort during a tool round, when no request is streaming", async () => {
+		const { root, calls } = await open(() => fauxAssistantMessage(fauxToolCall("wait", {}), { stopReason: "toolUse" }));
+		await root.submit({ type: "input", content: "wait" }, context);
+		await expect.poll(async () => (await harness?.snapshot(LiveDoc, root.id, context))?.tools?.length).toBe(1);
+		// The bridge's Claude Code query sits parked on this signal, waiting for the tool's result.
+		expect(calls[0]?.options?.signal?.aborted).toBe(false);
+		await root.abort(context);
+		await expect.poll(() => calls[0]?.options?.signal?.aborted).toBe(true);
+	});
+
+	it("gives each run a fresh signal", async () => {
+		const { root, calls } = await open(() => fauxAssistantMessage("hi"));
+		await ask(root, "one");
+		await ask(root, "two");
+		expect(calls[1]?.options?.signal).not.toBe(calls[0]?.options?.signal);
+		expect(calls[1]?.abortedAtCall).toBe(false);
 	});
 
 	it("tells the bridge when history is rewritten, and only then", async () => {

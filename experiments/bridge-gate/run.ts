@@ -89,7 +89,12 @@ const answer = (result: Line | undefined) => result?.answer as Answer | undefine
 const text = (result: Line | undefined) => answer(result)?.text ?? "";
 const done = (result: Line | undefined) => result?.status === "done";
 const marked = (result: Line | undefined) => text(result).trimEnd().endsWith(MARKER);
-const turn = (conv: string, requestId: string, text: string): Step => ({ op: "turn", conv, requestId, text });
+const turn = (conv: string, requestId: string, text: string): Extract<Step, { op: "turn" }> => ({
+	op: "turn",
+	conv,
+	requestId,
+	text,
+});
 const noTools = (question: string) => `Without using any tools: ${question}`;
 
 // 1. A turn with several tool calls.
@@ -161,7 +166,49 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	note(`answer: ${JSON.stringify(text(result))}`);
 }
 
-// 3. Compact mid-conversation and continue, in one process, so the bridge holds a
+// 3. Esc mid-tool: abort while bash runs, so no request is streaming, then carry on in
+//    the same process.
+{
+	const group = "esc";
+	const run = await host(group, [
+		{
+			...turn(
+				"root",
+				"esc",
+				"Run exactly this bash command and nothing else first: `sleep 30`. Then say what it printed.",
+			),
+			abortOnTool: "sleep",
+		},
+		{ op: "processes", conv: "root", waitMs: 3000 },
+		turn("root", "after-esc", noTools("in one sentence, what did I just ask you to run?")),
+	]);
+	const [aborted, processes, after] = run.results;
+	check(
+		group,
+		"turn ended as aborted",
+		aborted?.status === "unanswered" && aborted.reason === "aborted",
+		`${aborted?.status} ${aborted?.reason}`,
+	);
+	check(group, "the bridge closed its Claude Code query", run.log.includes("abort detected"));
+	const left = (processes?.processes as string[] | undefined) ?? ["(no result)"];
+	check(group, "nothing left running in the workspace while the daemon lives on", left.length === 0, left.join("; "));
+	check(group, "next turn answered", done(after), String(after?.reason ?? ""));
+	check(
+		group,
+		"next turn was a fresh query, not one re-entering a parked query",
+		!run.log.includes("isReentrant=true"),
+	);
+	check(
+		group,
+		"the bridge rebuilt Claude Code's session after the abort",
+		run.paths.at(-1) === "rebuild",
+		run.paths.join(","),
+	);
+	check(group, "AGENTS.md still reached Claude Code", marked(after));
+	note(`answer: ${JSON.stringify(text(after))}`);
+}
+
+// 4. Compact mid-conversation and continue, in one process, so the bridge holds a
 //    Claude Code session it could wrongly keep resuming.
 {
 	const group = "compact";
@@ -199,7 +246,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	check(group, "AGENTS.md still reached Claude Code", marked(after));
 }
 
-// 4. Fork, and continue both branches, alternating in one process.
+// 5. Fork, and continue both branches, alternating in one process.
 {
 	const group = "fork";
 	const run = await host(group, [
@@ -239,7 +286,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	);
 }
 
-// 5. Control: the same compaction without the shim's rewrite mark. Not a check of the
+// 6. Control: the same compaction without the shim's rewrite mark. Not a check of the
 //    shim; it shows what the mark prevents.
 {
 	const group = "control";
@@ -259,7 +306,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	note(`answer: ${JSON.stringify(text(run.results[2]))}`);
 }
 
-// 6. Across every run.
+// 7. Across every run.
 {
 	const group = "all";
 	const everything = `${transcript.join("\n")}\n${existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8") : ""}`;

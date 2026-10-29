@@ -6,7 +6,7 @@ Like a pier: it stays put, and boats tie up and cast off.
 
 **Status:** proof of concept, step 1 of 5 done. The bridge gate passed on 2026-10-29:
 pi-claude-bridge runs on a Durable Harness through a shim, including a crash mid-tool,
-compaction and forks. The daemon, protocol and TUI client are next; see
+Esc mid-tool, compaction and forks. The daemon, protocol and TUI client are next; see
 [`todos/`](todos/).
 
 ## Layout
@@ -53,8 +53,11 @@ Three things that aren't obvious, all checked by the gate or the unit tests:
 - **Signals.** The bridge keeps a Claude Code query alive across a tool round, tied to
   the signal of the request that started it. pi's signal lasts a run. Durable's lasts a
   task invocation, and aborts when the invocation ends, normally too, which killed every
-  query at its first tool round. The shim gives the bridge one signal per session, and
-  only passes an abort through while the request is still streaming.
+  query at its first tool round. The shim gives the bridge one signal per session and
+  run. It passes an abort through only while a request is still streaming, and aborts
+  the signal itself when the run ends. That covers Esc during a tool round, when nothing
+  is streaming. It sees runs end by following the Harness's commits, so a host calls
+  `shim.attach(harness)` right after opening it.
 - **No `new`, `resume` or `fork` reasons.** For those the bridge clears *every* session's
   state, which in one process serving many conversations means all of them.
 - **The rewrite mark matters.** Without `session_compact`, the turn after a compaction

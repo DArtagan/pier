@@ -11,7 +11,7 @@ spec here is deleted. A file sitting in this directory means the work has not be
 ## Open
 
 **[poc.md](poc.md) — the proof of concept: daemon, protocol, TUI client, vanilla parity**
-Step 1, the bridge gate, passed on 2026-10-29 (33/33 checks). Next is step 2: the
+Step 1, the bridge gate, passed on 2026-10-29 (40/40 checks, Esc mid-tool included). Next is step 2: the
 daemon, a Unix socket, and a wire protocol over Durable's watches. Packaging and the
 home-manager module (step 5) are tracked in dotfiles' `todos/pi-durable.md`.
 

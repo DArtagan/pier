@@ -53,7 +53,7 @@ they come up.
 `npm run gate` (`experiments/bridge-gate/`) ran pi-claude-bridge 0.9.3 on a Durable
 1.4.0 Harness (SQLite, pi's `ModelRuntime`, `CodingTools`, the shim), against real
 Claude Code 2.1.311 on `claude-bridge/claude-opus-5-5` (sent to Claude Code as
-`claude-opus-5-5[1m]`), thinking `low`. **33/33 checks passed.** (The gate's first
+`claude-opus-5-5[1m]`), thinking `low`. **33/33 checks passed**, and 40/40 once Esc was added. (The gate's first
 version ran every step in a fresh process. The bridge then never had state to get
 wrong, so its compaction and fork checks proved nothing. It now runs related steps in
 one process.) What held:
@@ -80,6 +80,10 @@ one process.) What held:
   never read through a tool, ended every answer. So the context files reached Claude
   Code through the bridge's prompt capture on every turn, including after a restart, a
   compaction and a fork.
+- **Esc mid-tool** (added later on 2026-10-29, 40/40 checks). The conversation was aborted
+  while `sleep 30` ran, so no request was streaming. The bridge closed its Claude Code
+  query and nothing was left running. The next turn in the same process was a fresh
+  query, which rebuilt Claude Code's session, and not one re-entering a parked query.
 - **No prompt-capture failure, no "out of extra usage"**, no assistant errors and no
   Harness reports, across every run.
 
@@ -89,8 +93,11 @@ What it took, and what was wrong in the original plan:
   (`scheduler.ts`, `#end`). The bridge ties a Claude Code query parked at a tool round
   to the signal of the request that started it, so every turn died at its first tool
   round ("Operation aborted"). The plan didn't foresee this. The shim now gives the
-  bridge one signal per session and forwards an abort only while a request is
-  streaming.
+  bridge one signal per session and run. It forwards an abort only while a request is
+  streaming, and ends the signal itself when the conversation's run ends (it follows
+  the Harness's commits for `pi.live`). Without that second part, Esc during a tool
+  round left Claude Code running, and the next turn re-entered beside it (a control run
+  showed both).
 - **`session_start` must not use the reasons `new`, `resume` or `fork`.** For those,
   the bridge clears every session's state (`clearSession`), not just the one starting.
   The shim uses `startup`. The original plan said to use all three.
@@ -109,11 +116,6 @@ What it took, and what was wrong in the original plan:
 
 ## Not yet checked from step 1
 
-- **Esc during a tool round.** Durable's `abort()` then aborts the tool tasks and
-  ends the run, but no request is streaming, so the shim forwards nothing. The bridge's
-  query stays parked until the next request, which it would then treat as a re-entrant
-  query. A likely fix: abort the session's run signal when the run ends unanswered
-  (`run_end`, or the inbox and live docs). Test it with the unit tests' stand-in first.
 - **Killing only the daemon's process**, not its group. Claude Code and the tools'
   children would be orphaned; a `sleep; echo` would still write its file. The systemd
   unit should keep `KillMode=control-group`.

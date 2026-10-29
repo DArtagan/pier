@@ -18,8 +18,10 @@ import {
 	defineExtension,
 	type Extension,
 	GenerationTask,
+	type Harness,
 	type HookApi,
 	hook,
+	type LiveState,
 	ProviderDoc,
 } from "@earendil-works/pi-durable";
 import type { LoadedBridge } from "./load.ts";
@@ -60,6 +62,11 @@ export interface BridgeShim {
 	readonly events: readonly string[];
 	/** Tools the bridge tried to register, which the shim drops. */
 	readonly droppedTools: readonly string[];
+	/**
+	 * Follow the Harness's commits, so the bridge hears when a run ends. Call once, right
+	 * after opening the Harness and before `resume()`. Returns the unsubscribe.
+	 */
+	attach(harness: Pick<Harness, "subscribeCommits">): () => void;
 	/** Fire `session_shutdown`; call before closing the Harness. */
 	shutdown(): Promise<void>;
 }
@@ -81,6 +88,9 @@ export function createBridgeShim(bridge: LoadedBridge, options: BridgeShimOption
 	// bridge keeps its Claude Code session under, and it survives restarts, so a daemon
 	// start sees each conversation as new to this process, as the bridge does.
 	const sessions = new Map<string, SessionState>();
+	const sessionOf = new Map<ConversationId, string>();
+	/** Each busy conversation's run, by its first input, to tell a handover from a new run. */
+	const runs = new Map<ConversationId, number>();
 
 	const runSignals = new RunSignals();
 
@@ -121,6 +131,7 @@ export function createBridgeShim(bridge: LoadedBridge, options: BridgeShimOption
 		const provider = await api.snapshot(ProviderDoc, api.conversationId, context);
 		if (provider === undefined) throw new Error(`Conversation ${api.conversationId} has no provider session id`);
 		const sessionId = provider.sessionId;
+		sessionOf.set(api.conversationId, sessionId);
 		let state = sessions.get(sessionId);
 		if (state === undefined) {
 			const agent = await api.snapshot(AgentDoc, api.conversationId, context);
@@ -180,6 +191,28 @@ export function createBridgeShim(bridge: LoadedBridge, options: BridgeShimOption
 		extension,
 		events: [...handlers.keys()],
 		droppedTools,
+		attach(harness) {
+			return harness.subscribeCommits((publication) => {
+				for (const change of publication.changes) {
+					if (change.type !== "document" || change.record.kind !== "pi.live") continue;
+					const conversationId = change.conversationId;
+					if (conversationId === undefined) continue;
+					const run = (change.value as LiveState | null)?.run;
+					const previous = runs.get(conversationId);
+					const current = run?.inputs[0];
+					if (current === undefined) runs.delete(conversationId);
+					else runs.set(conversationId, current);
+					if (previous === undefined || previous === current) continue;
+					// The run ended: answered, aborted (Esc mid-tool, when no request is
+					// streaming), or failed. pi's run signal ends with its run, and a query
+					// still parked on it would otherwise wait for a result that never comes.
+					const sessionId = sessionOf.get(conversationId);
+					if (sessionId === undefined) continue;
+					log(`run ended ${sessionId}`);
+					runSignals.end(sessionId);
+				}
+			});
+		},
 		async shutdown() {
 			for (const [sessionId, state] of sessions) {
 				await emit("session_shutdown", {}, contextFor(sessionId, state));
@@ -196,8 +229,9 @@ type StreamSimple = (model: Model<Api>, context: Context, options?: SimpleStream
  * signal of the request that started it, as pi's signal lasts a whole run. Durable's
  * lasts one task invocation: it aborts when the request's invocation ends, normally
  * too, which killed every query parked at a tool boundary. So the bridge gets one
- * signal per provider session instead, aborted only when a request's own signal
- * aborts while that request is still streaming: a real abort, not a finished task.
+ * signal per provider session and run instead. It aborts when a request's own signal
+ * aborts while that request is still streaming (a real abort, not a finished task),
+ * and when the run ends (`end`), which covers an abort between requests.
  */
 class RunSignals {
 	readonly #runs = new Map<string, AbortController>();
@@ -223,6 +257,12 @@ class RunSignals {
 			void stream.result().finally(() => outer.removeEventListener("abort", forward));
 			return stream;
 		};
+	}
+
+	/** End the session's run: abort its signal, so the next request starts a new one. */
+	end(sessionId: string): void {
+		this.#runs.get(sessionId)?.abort(new Error("Run ended"));
+		this.#runs.delete(sessionId);
 	}
 }
 

@@ -3,7 +3,7 @@
 //   node experiments/bridge-gate/host.ts <state-dir> '<steps as a JSON array>'
 // Prints JSON lines: each conversation's agent events, and a `result` per step.
 // PIER_GATE_NO_REWRITE_MARK=1 turns off the shim's history-rewrite mark, as a control.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -26,7 +26,10 @@ import { createBridgeShim } from "../../src/bridge/shim.ts";
 import { createPrompt } from "../../src/prompt.ts";
 
 export type Step =
-	| { op: "turn"; conv: string; text: string; requestId: string }
+	/** `abortOnTool`: abort the conversation, as Esc does, once a tool call's arguments contain this. */
+	| { op: "turn"; conv: string; text: string; requestId: string; abortOnTool?: string }
+	/** Processes still running in the workspace after `waitMs`. */
+	| { op: "processes"; conv: string; waitMs: number }
 	| { op: "resume"; conv: string; submission: SubmissionId }
 	| { op: "compact"; conv: string; instructions?: string }
 	| { op: "fork"; conv: string; as: string }
@@ -75,6 +78,10 @@ const harness = await Harness.open(
 	},
 	context,
 );
+// PIER_GATE_NO_RUN_END=1 leaves the shim unattached, so runs ending go unseen, as a control.
+if (process.env.PIER_GATE_NO_RUN_END !== "1") shim.attach(harness);
+
+let abortTrigger: { conversation: Conversation; match: string } | undefined;
 
 const open = async (key: string): Promise<Conversation> => {
 	const id = conversations[key];
@@ -98,6 +105,15 @@ const watch = async (conversation: Conversation) => {
 			switch (event.type) {
 				case "tool_execution_start":
 					out({ t: "tool_start", tool: event.toolName, args: event.args });
+					if (
+						abortTrigger?.conversation.id === conversation.id &&
+						JSON.stringify(event.args).includes(abortTrigger.match)
+					) {
+						const target = abortTrigger.conversation;
+						abortTrigger = undefined;
+						out({ t: "abort" });
+						void target.abort(context);
+					}
 					break;
 				case "tool_execution_end": {
 					const result = event.entry?.model?.[0];
@@ -155,6 +171,7 @@ await harness.close(context);
 async function run(step: Step, conversation: Conversation): Promise<Record<string, unknown>> {
 	switch (step.op) {
 		case "turn": {
+			if (step.abortOnTool !== undefined) abortTrigger = { conversation, match: step.abortOnTool };
 			const submission = await conversation.submit(
 				{ type: "input", content: step.text, requestId: step.requestId },
 				context,
@@ -182,7 +199,25 @@ async function run(step: Step, conversation: Conversation): Promise<Record<strin
 		}
 		case "inspect":
 			return { inspect: await harness.inspect(context) };
+		case "processes": {
+			await new Promise((resolve) => setTimeout(resolve, step.waitMs));
+			return { processes: processesIn(workspace) };
+		}
 	}
+}
+
+/** Live processes whose working directory is under `dir`. */
+export function processesIn(dir: string): string[] {
+	const found: string[] = [];
+	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+		try {
+			if (!readlinkSync(`/proc/${pid}/cwd`).startsWith(dir)) continue;
+			found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120)}`);
+		} catch {
+			// Gone, or not ours to read.
+		}
+	}
+	return found;
 }
 
 function textOf(content: readonly { type: string; text?: string }[] | string): string {
