@@ -2,14 +2,13 @@
 
 ## Opening prompt
 
-> Read `todos/poc.md`, then do step 2: the daemon and the protocol. Start by reading
-> Durable's `watch()` / `viewState()` / `watchEvents()` and Chord's links, and decide
-> whether a client should apply view operations or agent events. Then build a daemon
-> that opens one Harness on SQLite with the shim, listens on a Unix socket in
-> `$XDG_RUNTIME_DIR`, and serves several conversations to several clients at once,
-> with each client's environment passed through. A headless client that drives it is
-> enough for this step; the TUI is step 3. Before building, settle the open questions
-> under "Daemon behaviour" with Will. Update this spec as facts change.
+> Read `todos/poc.md`, then do step 2: the daemon and the protocol, as decided in
+> `todos/wire-format.md` (if that file still exists, Will hasn't decided yet: ask). Build
+> a daemon that opens one Harness on SQLite with the shim (`shim.attach(harness)`
+> included), listens on a Unix socket in `$XDG_RUNTIME_DIR`, and serves several
+> conversations to several clients at once, with each client's environment passed
+> through. A headless client that drives it is enough for this step; the TUI is step
+> 3. Update this spec as facts change.
 
 Moved here from dotfiles' `todos/pi-durable.md` on **2026-10-29**, when step 1 passed.
 That file now tracks only the Nix side (packaging and the home-manager module).
@@ -43,10 +42,21 @@ Will, 2026-10-29: build the implementation in its own repo in `~/repositories`,
 *"keep the git repo local for now"*, set up like dotfiles (devenv, linters, tests,
 `todos/`, MIT). That's this repo, named pier by Claude.
 
+Will, 2026-10-29, on the proposals below:
+
+- One storage: *"Yes, one SQLite for all conversations"*.
+- The environment: *"Yes, for now keep it simple by passing through the whole
+  environment. We can refine it later."* (`SSH_AUTH_SOCK` included, despite the
+  conflict with dotfiles' `todos/ssh-agent.md`.)
+- `/quit`, `/exit`, `/detach` as proposed under "Daemon behaviour": *"Yes, those
+  definitions are fine for quit, exit, detach."* What Ctrl+C on an empty prompt does
+  is still open.
+- The transport: *"I don't know enough to make a decision here - please describe out
+  the option space for me."* Laid out, with the wire format, in
+  `todos/wire-format.md`, waiting on his answers.
+
 Proposed on 2026-10-28 and not objected to, but not explicitly signed off: the build
-order below, one SQLite storage for all conversations, a Unix socket for local
-clients, `/quit` keeping vanilla semantics plus a new `/detach`. Confirm these when
-they come up.
+order below.
 
 ## Step 1, the bridge gate: passed 2026-10-29
 
@@ -267,8 +277,8 @@ isolating failures.
 ## Build order
 
 1. ~~**Headless bridge test.**~~ Passed 2026-10-29; see above.
-2. **The daemon and the protocol.** A Unix socket and a wire protocol over the
-   view/controller split (try Chord). Pass the client's environment through
+2. **The daemon and the protocol.** The wire format and transport options are in
+   `todos/wire-format.md`, waiting on Will. Pass the client's environment through
    (below). A headless client is enough to prove it.
 3. **The TUI client.** Port `tui.ts` from v1.0.0 to Durable 1.4.0. Load settings,
    keybindings and theme with pi's exported managers.
@@ -298,9 +308,9 @@ isolating failures.
 - **Environment.** Vanilla pi's bash inherits the pane's shell: devenv/direnv
   `PATH`, `nix develop`, `SSH_AUTH_SOCK`. A service gets systemd's, which is the
   problem dotfiles' `modules/pi/remote.nix` patches over for agegr.
-  - The plan: the client sends its environment on attach, the daemon stores it in
-    a conversation document, and `env` passes it as `shellEnv`. Refresh it on
-    every attach, so devenv changes take effect.
+  - Decided: the client sends its whole environment on attach, the daemon stores
+    it in a conversation document, and `env` passes it as `shellEnv`. Refresh it on
+    every attach, so devenv changes take effect. Refine later.
   - `GIT_CONFIG_GLOBAL` (the agents' git config without difftastic) goes in the
     unit, as `remote.nix` does.
 - **The bridge's debug log** defaults to pi's `~/.pi/agent/claude-bridge.log`. Give
@@ -309,9 +319,9 @@ isolating failures.
   after you detach, while that socket lives. This conflicts with the
   per-terminal approval in dotfiles' `todos/ssh-agent.md`; settle it with that spec.
 - **Closing a pane doesn't stop the agent.**
-  - Proposed: `/quit` keeps vanilla semantics (it ends the session's running
-    turn), `/exit` keeps waiting for the turn as dotfiles' `modules/pi/exit.ts`
-    does, and a new `/detach` leaves it running.
+  - Decided (Will, 2026-10-29): `/quit` keeps vanilla semantics (it ends the
+    session's running turn), `/exit` keeps waiting for the turn as dotfiles'
+    `modules/pi/exit.ts` does, and a new `/detach` leaves it running.
   - Decide what Ctrl+C on an empty prompt does. The demo exited at once and left
     the work running.
 - **Restarts interrupt every pane.** home-manager restarts a changed user service
@@ -328,8 +338,9 @@ isolating failures.
 ## Not checked
 
 - How much of the v1.0.0 `tui.ts` / `runtime.ts` still compiles against 1.4.0.
-- Chord as the transport: whether `viewState()`'s replicated state can be served
-  across a link directly, or needs copying into a Chord `state`.
+- Chord as the transport: see `todos/wire-format.md`. (Earendil's v1.1.0 stack served
+  `viewState()` directly as a Chord service, so it can be done; Chord's API has
+  changed since.)
 - Whether Durable's `CodingTools` output renders well in the coding agent's
   `ToolExecutionComponent` without its renderers.
 - How the bridge's Claude Code process count and memory scale with many idle
