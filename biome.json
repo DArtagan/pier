@@ -1,0 +1,9 @@
+{
+	"formatter": {
+		"indentStyle": "tab",
+		"lineWidth": 120
+	},
+	"files": {
+		"includes": ["**", "!**/node_modules", "!**/.devenv", "!**/.direnv"]
+	}
+}
