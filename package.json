@@ -1,6 +1,6 @@
 {
 	"name": "pier",
-	"version": "0.0.0",
+	"version": "1.0.0",
 	"private": true,
 	"description": "pi on Pi Durable: one daemon per host, thin clients",
 	"license": "MIT",
