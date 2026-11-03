@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  # The same hooks `git commit` runs, through the same devenv, so CI and a
+  # local commit cannot disagree about formatting, lint, types or tests.
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v17
+        with:
+          name: devenv
+      - run: nix profile install nixpkgs#devenv
+      - run: devenv test

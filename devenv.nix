@@ -21,12 +21,21 @@
 
   git-hooks.hooks = {
     biome.enable = true;
+    # release-please derives every version and changelog entry from these.
+    convco.enable = true;
     deadnix.enable = true;
-    end-of-file-fixer.enable = true;
+    # CHANGELOG.md is written by release-please.
+    end-of-file-fixer = {
+      enable = true;
+      excludes = [ "^CHANGELOG\\.md$" ];
+    };
     nixfmt.enable = true;
     shellcheck.enable = true;
     statix.enable = true;
-    trim-trailing-whitespace.enable = true;
+    trim-trailing-whitespace = {
+      enable = true;
+      excludes = [ "^CHANGELOG\\.md$" ];
+    };
     typecheck = {
       enable = true;
       name = "typecheck";

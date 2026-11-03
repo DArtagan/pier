@@ -19,8 +19,11 @@ pi-claude-bridge runs on Durable through `src/bridge/shim.ts`.
   Opus turns on Will's subscription, so run it when the shim, the bridge or pi's
   version changes, not as a matter of routine.
 - **Larger changes go on a branch in a worktree under `.worktrees/`** (gitignored):
-  `git worktree add -b <branch> .worktrees/<branch> main`. The repo is local only for
-  now, with no remote; merge locally.
+  `git worktree add -b <branch> .worktrees/<branch> main`. It's on GitHub as
+  `DArtagan/pier`; merge through a pull request, where CI runs `devenv test`.
+- **Commits are [Conventional Commits](https://www.conventionalcommits.org/)**, checked
+  by the `convco` hook: release-please makes versions and `CHANGELOG.md` from them. Only
+  `feat`, `fix`, `perf` and `revert` cut a release. See `docs/releasing.md`.
 
 ## Working with Pi Durable
 
