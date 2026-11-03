@@ -14,11 +14,20 @@ A release is a deliberate act: merging a commit to `main` releases nothing.
 3. Merging that pull request tags `vX.Y.Z` and creates a GitHub release. Nothing is
    published: dotfiles packages pier with Nix.
 
-Neither tags nor the release branch carry the package name:
-`include-component-in-tag` is false and `package-name` is absent from
-`release-please-config.json`. release-please names the branch from `package-name`
-whatever the tag setting says; the node strategy reads the name from `package.json`
-instead.
+Neither tags nor the release branch carry the package name. In
+`release-please-config.json`, `include-component-in-tag` is false and `package-name`
+is `""`. release-please names the branch from the package name whatever the tag
+setting says, and when `package-name` is absent the node strategy reads it from
+`package.json`, so the first release PR's branch was
+`release-please--branches--main--components--pier`. An empty `package-name` is
+kept as is (`??`, in `strategies/base.ts`); node uses the name otherwise only for
+`changelog.json` and `samples/package.json`, which pier doesn't have.
+`separate-pull-requests: false` would also drop it from the branch, but its
+combined PR body then fails to match the package when merged, and no release is
+made.
+
+With no release yet, release-please starts at `initial-version`, 0.1.0; without
+it, at 1.0.0.
 
 Only `feat`, `fix`, `perf` and `revert` commits, and breaking changes, make a
 release. For the `node` release type `docs`, `chore`, `ci`, `test` and `refactor`
