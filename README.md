@@ -20,6 +20,7 @@ Esc mid-tool, compaction and forks. The daemon, protocol and TUI client are next
   Durable Harness, each step in its own process so it can be killed.
 - `test/` holds offline tests of the shim against a stand-in bridge.
 - `todos/` holds specs for work not yet done.
+- `docs/releasing.md` says how release-please makes versions.
 
 ## Commands
 
