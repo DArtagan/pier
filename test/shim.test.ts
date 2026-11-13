@@ -9,7 +9,6 @@ import {
 	type Context,
 	createAssistantMessageEventStream,
 	type SimpleStreamOptions,
-	Type,
 } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -24,6 +23,7 @@ import {
 	ProviderDoc,
 	section,
 } from "@earendil-works/pi-durable";
+import { obj } from "@earendil-works/pi-schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type LoadedBridge, loadBridge } from "../src/bridge/load.ts";
 import { type BridgeShim, createBridgeShim } from "../src/bridge/shim.ts";
@@ -100,7 +100,7 @@ function fakeBridge(toBridgeContext: LoadedBridge["toBridgeContext"], respond: R
 const noop = defineTool({
 	name: "noop",
 	description: "Does nothing",
-	parameters: Type.Object({}),
+	parameters: obj({}),
 	execute: async () => ({ output: [{ type: "text", text: "ok" }] }),
 });
 
@@ -108,7 +108,7 @@ const noop = defineTool({
 const wait = defineTool({
 	name: "wait",
 	description: "Waits until aborted",
-	parameters: Type.Object({}),
+	parameters: obj({}),
 	execute: (_args, _api, context) =>
 		new Promise((resolve) =>
 			context.abortSignal?.addEventListener("abort", () => resolve({ output: [{ type: "text", text: "aborted" }] })),

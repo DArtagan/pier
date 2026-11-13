@@ -4,8 +4,17 @@
 //   npm run gate            (uses your Claude Code login: about fifteen Opus turns)
 // Leaves its state directory behind and prints its path, with the bridge's debug log.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Step } from "./host.ts";
 
@@ -15,7 +24,13 @@ const MARKER = "PINEAPPLE";
 const stateDir = mkdtempSync(join(tmpdir(), "pier-gate-"));
 const workspace = join(stateDir, "workspace");
 const bridgeLog = join(stateDir, "bridge.log");
+// pi's agent dir for the gate alone: since 0.10 the bridge keeps per-session state
+// there (claude-bridge/sessions/), which would otherwise land in your real one. It
+// still needs your claude-bridge.json, for the Claude Code executable.
+const agentDir = join(stateDir, "agent");
 mkdirSync(workspace);
+mkdirSync(agentDir);
+copyFileSync(join(homedir(), ".pi/agent/claude-bridge.json"), join(agentDir, "claude-bridge.json"));
 // The model never reads this file in the gate, so the marker in its answers can only
 // have come from the context files the bridge forwards to Claude Code.
 writeFileSync(
@@ -37,28 +52,45 @@ interface Run {
 	lines: Line[];
 	/** One per finished step, in order. */
 	results: Line[];
-	/** The bridge's session sync decisions, one per fresh Claude Code query: clean-start, rebuild or reuse. */
+	/**
+	 * The bridge's session sync decisions, one per fresh Claude Code query: clean-start (no
+	 * history), rebuild (import Durable's history), fork or prefix-write (keep Claude Code's
+	 * matching records, add the rest), or reuse (resume as is).
+	 */
 	paths: string[];
 	log: string;
 	signal: NodeJS.Signals | null;
+	/** Processes in the workspace that outlived a kill of the host's process group. */
+	survivors: string[];
 }
 
-/** Run steps in one host process. `kill` sees each line and returns true to SIGKILL the host's process group. */
+/**
+ * Run steps in one host process. `kill` sees each line and returns true to arm a SIGKILL
+ * of the host's process group, sent once `killWhen` holds (polled; at once without it).
+ */
 function host(
 	group: string,
 	steps: Step[],
-	options: { kill?: (line: Line) => boolean; env?: Record<string, string> } = {},
+	options: { kill?: (line: Line) => boolean; killWhen?: () => boolean; env?: Record<string, string> } = {},
 ): Promise<Run> {
 	const from = existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8").length : 0;
 	return new Promise((resolve) => {
 		const child = spawn(process.execPath, [join(import.meta.dirname, "host.ts"), stateDir, JSON.stringify(steps)], {
-			env: { ...process.env, CLAUDE_BRIDGE_DEBUG: "1", CLAUDE_BRIDGE_DEBUG_PATH: bridgeLog, ...options.env },
+			env: {
+				...process.env,
+				CLAUDE_BRIDGE_DEBUG: "1",
+				CLAUDE_BRIDGE_DEBUG_PATH: bridgeLog,
+				PI_CODING_AGENT_DIR: agentDir,
+				...options.env,
+			},
 			stdio: ["ignore", "pipe", "pipe"],
-			// Its own process group, so a kill takes Claude Code and the tools' children with
-			// it, as systemd's control-group kill would.
+			// Its own process group, so a kill takes Claude Code with it. Durable runs each
+			// tool in a process group of its own, so the kill below also takes everything in
+			// the workspace, as systemd's control-group kill would.
 			detached: true,
 		});
 		const lines: Line[] = [];
+		const survivors: string[] = [];
 		let buffer = "";
 		let killed = false;
 		child.stdout.on("data", (chunk: Buffer) => {
@@ -71,7 +103,16 @@ function host(
 				lines.push(line);
 				if (!killed && options.kill?.(line) === true && child.pid !== undefined) {
 					killed = true;
-					process.kill(-child.pid, "SIGKILL");
+					const pid = child.pid;
+					const poll = setInterval(() => {
+						if (options.killWhen !== undefined && !options.killWhen()) return;
+						clearInterval(poll);
+						process.kill(-pid, "SIGKILL");
+						// What a process-group kill alone leaves running, then what the cgroup
+						// kill takes too.
+						survivors.push(...processesIn(workspace));
+						for (const line of survivors) process.kill(Number(line.split(" ")[0]), "SIGKILL");
+					}, 50);
 				}
 			}
 		});
@@ -79,7 +120,7 @@ function host(
 		child.on("exit", (_code, signal) => {
 			const log = existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8").slice(from) : "";
 			const paths = [...log.matchAll(/syncResult: path=(\S+)/g)].map((match) => match[1] ?? "");
-			resolve({ lines, results: lines.filter((line) => line.t === "result"), paths, log, signal });
+			resolve({ lines, results: lines.filter((line) => line.t === "result"), paths, log, signal, survivors });
 		});
 	});
 }
@@ -139,6 +180,10 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 				if (line.t === "submitted") submission = line.id;
 				return line.t === "tool_start" && JSON.stringify(line.args).includes("sleep");
 			},
+			// Durable 1.5 shows a slot running before the call's intent is stored and the
+			// tool starts; a kill then is before the call, and it rightly runs after the
+			// restart. Kill once the command is really running.
+			killWhen: () => processesIn(workspace).some((line) => line.includes("sleep 20")),
 		},
 	);
 	check(
@@ -147,21 +192,26 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 		crashed.signal === "SIGKILL" && crashed.results.length === 0,
 		`signal=${crashed.signal}`,
 	);
+	check(group, "the command hadn't finished when killed", !existsSync(join(workspace, "slept.txt")));
+	note(`outlived the host's process-group kill: ${crashed.survivors.join("; ") || "nothing"}`);
 	const left = processesIn(workspace);
-	check(group, "nothing left running in the workspace", left.length === 0, left.join("; "));
+	check(group, "a control-group kill leaves nothing running", left.length === 0, left.join("; "));
 	const resumed = await host(`${group}/resume`, [{ op: "resume", conv: "root", submission: submission as never }]);
 	const result = resumed.results[0];
 	check(group, "turn finished after restart, unprompted", done(result), String(result?.reason ?? ""));
 	check(group, "AGENTS.md still reached Claude Code", marked(result));
 	check(
 		group,
-		"bridge rebuilt Claude Code's session from Durable's history",
-		resumed.paths[0] === "rebuild",
+		"Claude Code got Durable's history after the restart",
+		resumed.paths.length > 0 && !resumed.paths.includes("clean-start"),
 		resumed.paths.join(","),
 	);
 	const interrupted = resumed.lines.find((line) => line.t === "tool_end" && line.isError === true);
-	note(
-		`interrupted tool result: ${interrupted === undefined ? "not seen (written before the watch attached)" : JSON.stringify(interrupted.text)}`,
+	check(
+		group,
+		"the cut-off bash call came back interrupted, not run again",
+		String(interrupted?.text ?? "").includes("interrupted"),
+		JSON.stringify(interrupted?.text ?? "(none)"),
 	);
 	note(`answer: ${JSON.stringify(text(result))}`);
 }
@@ -189,7 +239,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 		aborted?.status === "unanswered" && aborted.reason === "aborted",
 		`${aborted?.status} ${aborted?.reason}`,
 	);
-	check(group, "the bridge closed its Claude Code query", run.log.includes("abort detected"));
+	check(group, "the bridge closed its Claude Code query", /for-await loop exited, wasAborted=true/.test(run.log));
 	const left = (processes?.processes as string[] | undefined) ?? ["(no result)"];
 	check(group, "nothing left running in the workspace while the daemon lives on", left.length === 0, left.join("; "));
 	check(group, "next turn answered", done(after), String(after?.reason ?? ""));
@@ -200,8 +250,8 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	);
 	check(
 		group,
-		"the bridge rebuilt Claude Code's session after the abort",
-		run.paths.at(-1) === "rebuild",
+		"the next turn didn't resume the aborted query's session as is",
+		run.paths.at(-1) !== "reuse" && run.paths.at(-1) !== "clean-start",
 		run.paths.join(","),
 	);
 	check(group, "AGENTS.md still reached Claude Code", marked(after));
@@ -235,7 +285,12 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	);
 	check(group, "summary went through the bridge's isolated path", run.log.includes("routed to isolated summary"));
 	check(group, "shim marked the rewrite", run.log.includes("session_compact:rewrite"));
-	check(group, "bridge rebuilt instead of resuming stale history", run.paths[2] === "rebuild", run.paths.join(","));
+	check(
+		group,
+		"bridge didn't resume stale history after the compaction",
+		run.paths[2] !== undefined && run.paths[2] !== "reuse" && run.paths[2] !== "clean-start",
+		run.paths.join(","),
+	);
 	check(group, "turn after compaction answered", done(after));
 	check(
 		group,

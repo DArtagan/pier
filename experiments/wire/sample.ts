@@ -1,16 +1,17 @@
-// Prints what each of Durable's watch APIs sends for one faux tool turn, as JSON lines,
-// with byte counts, for comparing wire formats (todos/wire-format.md).
-//   node experiments/wire/sample.ts <ops|events> [--late]
+// Prints what a conversation watch sends for one faux tool turn, as JSON lines, with
+// byte counts, for the wire format report (todos/wire-format.md): the view, then the
+// folded operations of each delivery. (Durable 1.5 removed the agent event stream this
+// used to compare against.)
+//   node experiments/wire/sample.ts [--late]
 // --late attaches mid-run, while the tool runs, as a client joining late would.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
-import { createRegistry, Harness, LiveDoc, MemoryStorage, watchEvents } from "@earendil-works/pi-durable";
+import { createRegistry, Harness, LiveDoc, MemoryStorage } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 
 const context = BACKGROUND_CONTEXT;
-const mode = process.argv[2] === "events" ? "events" : "ops";
 const late = process.argv.includes("--late");
 let bytes = 0;
 let frames = 0;
@@ -40,17 +41,11 @@ const harness = await Harness.open(new MemoryStorage(), { models, registry, env:
 const root = await harness.root(context, { agent: { model: { provider: "faux", modelId: "faux-1" } } });
 
 const attach = async () => {
-	if (mode === "events") {
-		const stream = await watchEvents(harness, root.id, context);
-		print(stream.snapshot);
-		stream.start(async (events) => {
-			for (const event of events) print(event);
-		});
-		return () => stream.stop();
-	}
 	const watch = await root.watch(context);
 	print({ view: watch.value });
-	watch.start(async (_value, ops) => print({ ops }));
+	watch.start(async (call) => {
+		if (call.kind === "value") print({ ops: call.ops });
+	});
 	return () => watch.stop();
 };
 
@@ -67,4 +62,4 @@ await harness.waitForIdle(context);
 await new Promise((resolve) => setTimeout(resolve, 50));
 await stop?.();
 await harness.close(context);
-console.error(`${mode}${late ? " (late)" : ""}: ${frames} frames, ${bytes} bytes`);
+console.error(`ops${late ? " (late)" : ""}: ${frames} frames, ${bytes} bytes`);

@@ -1,7 +1,7 @@
 // Runs pi-claude-bridge on a Durable Harness by standing in for the parts of pi's
 // ExtensionAPI it uses: provider registration, and the session and prompt events it
 // keys its per-session state on. See todos/ for what each event has to carry.
-import type { Context as ChordContext } from "@earendil-works/chord";
+import type { Context as ChordContext } from "@earendil-works/chord/context";
 import type {
 	Api,
 	AssistantMessageEventStream,
@@ -64,9 +64,9 @@ export interface BridgeShim {
 	readonly droppedTools: readonly string[];
 	/**
 	 * Follow the Harness's commits, so the bridge hears when a run ends. Call once, right
-	 * after opening the Harness and before `resume()`. Returns the unsubscribe.
+	 * after opening the Harness and before `resume()`. Returns the detach.
 	 */
-	attach(harness: Pick<Harness, "subscribeCommits">): () => void;
+	attach(harness: Pick<Harness, "observeCommits">): () => void;
 	/** Fire `session_shutdown`; call before closing the Harness. */
 	shutdown(): Promise<void>;
 }
@@ -192,26 +192,33 @@ export function createBridgeShim(bridge: LoadedBridge, options: BridgeShimOption
 		events: [...handlers.keys()],
 		droppedTools,
 		attach(harness) {
-			return harness.subscribeCommits((publication) => {
-				for (const change of publication.changes) {
-					if (change.type !== "document" || change.record.kind !== "pi.live") continue;
-					const conversationId = change.conversationId;
-					if (conversationId === undefined) continue;
-					const run = (change.value as LiveState | null)?.run;
-					const previous = runs.get(conversationId);
-					const current = run?.inputs[0];
-					if (current === undefined) runs.delete(conversationId);
-					else runs.set(conversationId, current);
-					if (previous === undefined || previous === current) continue;
-					// The run ended: answered, aborted (Esc mid-tool, when no request is
-					// streaming), or failed. pi's run signal ends with its run, and a query
-					// still parked on it would otherwise wait for a result that never comes.
-					const sessionId = sessionOf.get(conversationId);
-					if (sessionId === undefined) continue;
-					log(`run ended ${sessionId}`);
-					runSignals.end(sessionId);
-				}
+			// Stored commits only (Durable 1.5 defers streamed progress), which is enough:
+			// the commits that start and end a run write more than pi.live, so they are
+			// stored at once.
+			const observation = harness.observeCommits({
+				advance: (publication) => {
+					for (const change of publication.changes) {
+						if (change.type !== "document" || change.record.kind !== "pi.live") continue;
+						const conversationId = change.conversationId;
+						if (conversationId === undefined) continue;
+						const run = change.kind === "change" ? (change.value as LiveState).run : undefined;
+						const previous = runs.get(conversationId);
+						const current = run?.inputs[0];
+						if (current === undefined) runs.delete(conversationId);
+						else runs.set(conversationId, current);
+						if (previous === undefined || previous === current) continue;
+						// The run ended: answered, aborted (Esc mid-tool, when no request is
+						// streaming), or failed. pi's run signal ends with its run, and a query
+						// still parked on it would otherwise wait for a result that never comes.
+						const sessionId = sessionOf.get(conversationId);
+						if (sessionId === undefined) continue;
+						log(`run ended ${sessionId}`);
+						runSignals.end(sessionId);
+					}
+				},
+				end: () => {},
 			});
+			return () => observation.detach();
 		},
 		async shutdown() {
 			for (const [sessionId, state] of sessions) {

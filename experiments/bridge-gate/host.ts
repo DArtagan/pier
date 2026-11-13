@@ -12,11 +12,13 @@ import {
 	AssistantEntry,
 	type Conversation,
 	type ConversationId,
+	type ConversationView,
 	createRegistry,
+	type EntryId,
 	Harness,
+	type LiveState,
 	ProviderDoc,
 	type SubmissionId,
-	watchEvents,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
@@ -74,7 +76,7 @@ const harness = await Harness.open(
 			// Small enough that a few turns give compaction something to summarize.
 			compaction: { keepRecentTokens: 200 },
 		},
-		onReport: (error, info) => out({ t: "report", info, error: String(error) }),
+		onReport: (report) => out({ t: "report", kind: report.kind, report, error: String(report.error) }),
 	},
 	context,
 );
@@ -98,46 +100,67 @@ const open = async (key: string): Promise<Conversation> => {
 	return conversation;
 };
 
+// Durable 1.5 removed its event stream: clients render the conversation's state. The
+// gate still wants a log of what happened, so derive one from the view's changes:
+// appended entries, tool slots, the run, and compactions.
 const watch = async (conversation: Conversation) => {
-	const stream = await watchEvents(harness, conversation.id, context);
-	stream.start(async (events) => {
-		for (const event of events) {
-			switch (event.type) {
-				case "tool_execution_start":
-					out({ t: "tool_start", tool: event.toolName, args: event.args });
-					if (
-						abortTrigger?.conversation.id === conversation.id &&
-						JSON.stringify(event.args).includes(abortTrigger.match)
-					) {
-						const target = abortTrigger.conversation;
-						abortTrigger = undefined;
-						out({ t: "abort" });
-						void target.abort(context);
-					}
-					break;
-				case "tool_execution_end": {
-					const result = event.entry?.model?.[0];
-					const text = result?.role === "toolResult" ? textOf(result.content) : undefined;
-					out({ t: "tool_end", tool: event.toolName, isError: result?.role === "toolResult" && result.isError, text });
-					break;
-				}
-				case "message_end": {
-					const message = event.entry.model?.[0];
-					if (message?.role === "assistant") out({ t: "assistant", ...summarize(message) });
-					break;
-				}
-				case "compaction_start":
-				case "compaction_end":
-				case "task_failed":
-				case "auto_retry_start":
-				case "run_start":
-				case "run_end":
-					out({ t: event.type, ...event, type: undefined });
-					break;
+	const handle = await conversation.watch(context);
+	const seen = new Set<EntryId>(handle.value.entries.map((entry) => entry.id));
+	const calls = new Map<string, unknown>();
+	const remember = (entries: ConversationView["entries"]) => {
+		for (const entry of entries) {
+			const message = entry.model?.[0];
+			if (message?.role !== "assistant") continue;
+			for (const part of message.content) if (part.type === "toolCall") calls.set(part.id, part.arguments);
+		}
+	};
+	remember(handle.value.entries);
+	const started = new Set<string>();
+	let wasRunning = (handle.value.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
+	let compactions = 0;
+	const describe = (view: ConversationView) => {
+		for (const entry of view.entries) {
+			if (seen.has(entry.id)) continue;
+			seen.add(entry.id);
+			const message = entry.model?.[0];
+			if (message?.role === "assistant") {
+				remember([entry]);
+				out({ t: "assistant", ...summarize(message) });
+			} else if (message?.role === "toolResult") {
+				out({ t: "tool_end", tool: message.toolName, isError: message.isError, text: textOf(message.content) });
 			}
 		}
+		const live = (view.docs["pi.live"] ?? {}) as LiveState;
+		for (const slot of live.tools ?? []) {
+			if (slot.status !== "running" || started.has(slot.callId)) continue;
+			started.add(slot.callId);
+			const args = calls.get(slot.callId) ?? {};
+			out({ t: "tool_start", tool: slot.name, args });
+			if (abortTrigger?.conversation.id === conversation.id && JSON.stringify(args).includes(abortTrigger.match)) {
+				const target = abortTrigger.conversation;
+				const match = abortTrigger.match;
+				abortTrigger = undefined;
+				// Durable shows a slot running before the call's intent is stored and the tool
+				// starts, so wait until the command is really running.
+				void untilRunning(match).then(() => {
+					out({ t: "abort" });
+					return target.abort(context);
+				});
+			}
+		}
+		const running = live.run !== undefined;
+		if (running !== wasRunning) out({ t: running ? "run_start" : "run_end", failure: live.runFailure });
+		wasRunning = running;
+		const count = live.compactions?.length ?? 0;
+		if (count !== compactions) out({ t: count > compactions ? "compaction_start" : "compaction_end" });
+		if (count < compactions && live.compactionFailure !== undefined)
+			out({ t: "compaction_failure", ...live.compactionFailure });
+		compactions = count;
+	};
+	handle.start(async (call) => {
+		if (call.kind === "value") describe(call.value);
 	});
-	return stream;
+	return handle;
 };
 
 const settle = async (conversation: Conversation, id: SubmissionId) => {
@@ -203,6 +226,14 @@ async function run(step: Step, conversation: Conversation): Promise<Record<strin
 			await new Promise((resolve) => setTimeout(resolve, step.waitMs));
 			return { processes: processesIn(workspace) };
 		}
+	}
+}
+
+/** Resolves once a process in the workspace has `match` in its command line, or after 10 s. */
+async function untilRunning(match: string): Promise<void> {
+	for (let waited = 0; waited < 10_000; waited += 50) {
+		if (processesIn(workspace).some((line) => line.includes(match))) return;
+		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 }
 
