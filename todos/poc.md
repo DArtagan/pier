@@ -2,13 +2,12 @@
 
 ## Opening prompt
 
-> Read `todos/poc.md`, then do step 2: the daemon and the protocol, as decided in
-> `todos/wire-format.md` (if that file still exists, Will hasn't decided yet: ask). Build
-> a daemon that opens one Harness on SQLite with the shim (`shim.attach(harness)`
-> included), listens on a Unix socket in `$XDG_RUNTIME_DIR`, and serves several
-> conversations to several clients at once, with each client's environment passed
-> through. A headless client that drives it is enough for this step; the TUI is step
-> 3. Update this spec as facts change.
+> Read `todos/poc.md`, starting with "The thin slice". It's built; what's left is
+> under "Not done yet" there, in the order given, and packaging in dotfiles
+> (`todos/pi-durable.md`). Keep to the slice's rules: nothing p3 will own, and
+> everything agent-side as Durable extensions and documents. Before building more,
+> check `apps/p3/docs/` on pi's `main` for what Earendil has decided since. Update
+> this spec as facts change.
 
 Moved here from dotfiles' `todos/pi-durable.md` on **2026-10-29**, when step 1 passed.
 That file now tracks only the Nix side (packaging and the home-manager module).
@@ -39,6 +38,101 @@ read-only clone of each at its tag). The gate passed again; what changed is mark
    the bridge and its shim are gone (in git history up to `dd44453`). Classic pi in
    dotfiles keeps the bridge, which this doesn't change. Where this spec describes the
    bridge below, it's the record of step 1.
+
+## The thin slice (built 2026-11-13)
+
+Will, 2026-11-13: *"Let's build the very thin slice."* That was Claude's proposal of the
+same day: while Earendil's p3 takes shape, build only what makes pier useful in tmux
+panes on one host, so that its parts carry over to p3 if it becomes the way. Not built:
+anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
+
+### What's built
+
+- **`pier daemon`** (`src/daemon.ts`, `src/cli.ts`): one Harness on one SQLite file
+  (`$XDG_STATE_HOME/pier/pier.sqlite`, directory 0700), pi-claude-code as the provider,
+  Durable's coding tools run sequentially, pier's prompt. It listens on
+  `$XDG_RUNTIME_DIR/pier/pier.sock` (0600, in a 0700 directory), and refuses to start
+  when another daemon answers there. `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
+  (`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override.
+  It runs in its state directory, since Claude Code tells the model about its working
+  directory (the first manual run had it puzzling over pier's own git worktree).
+- **The protocol** (`src/protocol.ts`): JSON in WebSocket messages over the Unix
+  socket. Requests with ids and one response each: `hello` (versions must match),
+  `attach`, `detach`, `submit`, `abort`, `compact`, `configure`, `list`, `entries`. An
+  attached connection gets Durable's conversation view, then each change's
+  operations, which the client applies with Chord's `applyImmutable`.
+- **The client** (`src/client.ts`, `src/tui.ts`): `pier` continues the newest
+  conversation in the current directory (by latest entry), or starts one; `pier new`,
+  `pier resume <id>`, `pier list [--all]`. On pi-tui, with pi's Markdown and list
+  themes: the transcript (user messages, Markdown answers, tool calls with the last
+  lines of their output, first lines of thinking), live streaming and tool output,
+  queued input, why a run failed, and a status line (working or ready, model,
+  thinking, tokens, conversation, directory).
+  - Enter sends, and steers while Claude works; Alt+Enter or Ctrl+Shift+Enter queues a
+    follow-up. Esc stops the run. Ctrl+C clears the editor, or leaves when it's empty,
+    as does Ctrl+D: leaving never stops the run.
+  - `/new`, `/resume [n|id|all]`, `/earlier` (older entries), `/compact
+    [instructions]`, `/thinking <level>`, `/detach`, `/quit` (stops the run, then
+    leaves), `/exit` (waits for the run, then leaves), `/help`. So Ctrl+C on an empty
+    prompt detaches, which was the open question.
+- **The environment** (decided 2026-10-29): `attach` carries the client's whole
+  environment. It's stored in the conversation's `pier.client-env` document, and every
+  tool call builds its `NodeExecutionEnv` from it, so the last pane to attach decides
+  the PATH, `SSH_AUTH_SOCK` and the rest. Stored, so work resumed after a restart
+  keeps it; it's on disk in the daemon's private state directory.
+- **Releasing Claude Code processes:** five minutes after a conversation's run ends,
+  the daemon calls `cleanupSessionResources()` for it, and for all of them on close.
+
+### Checked
+
+- **Offline** (`test/daemon.test.ts`, faux model, real socket, 7 tests): a second
+  client sees the first's run live; tools run with the attaching client's
+  environment; continue and list by directory; abort; conversations survive a
+  restart; a second daemon is refused; requests before attaching are refused.
+- **By hand, 2026-11-13, with real Claude** (Opus 5.5 through pi-claude-code, tmux):
+  a tool turn that followed AGENTS.md; detaching and continuing with the history;
+  `/resume`; Esc while `sleep 60` ran (it stopped, and nothing was left running); a
+  second pane watching the same conversation answer live; and SIGTERM to the daemon
+  while `sleep 15; echo hi > restarted.txt` ran. After a restart, the turn went on
+  with nobody asking: the call came back interrupted, Claude ran it again, and
+  answered. The gate itself wasn't rerun: it drives a Harness of its own, not the
+  daemon.
+
+### Rules that keep it portable to p3
+
+- Agent behaviour goes in **Durable extensions** (prompt sections, tools, hooks) and
+  pier's state in **Durable documents**. p3 plans to take plugins' Durable extensions
+  as they are.
+- The provider is a **plain pi-ai provider** (pi-claude-code).
+- The client renders **Durable's view**, as p2 does; the transport under it is a thin
+  adapter.
+- The daemon, the socket, the envelope, the CLI and the SQLite file are expected to be
+  thrown away. p3 keeps a store per session, so moving conversations would need a
+  conversion; treat them as disposable.
+
+### Not done yet, in order
+
+1. **Use it daily**, and fix what that turns up.
+2. **Packaging** in dotfiles (`todos/pi-durable.md`): a user service, and `pier` on
+   the PATH. Node won't strip types under `node_modules`, which is where
+   `buildNpmPackage` puts a package, so pier needs a build step (esbuild or `tsc`)
+   first.
+3. **Rendering**: diffs for edits, images, the footer's cost and context.
+4. **What pi has that's missed most**, judged by use: `!` bash, `@file`, `/fork`,
+   `/model`.
+5. **Not planned**: sign-in, remote access, a web UI, plugins. Over SSH, `ssh <host>
+   pier` works today.
+
+### Known gaps
+
+- A tool call has no timeout unless the model sets one (Durable's bash has no
+  default).
+- One environment per conversation: two panes in different shells on one
+  conversation take turns deciding it.
+- `continue` scans up to 500 conversations each time; fine for now.
+- The protocol has no backpressure: a slow client's socket buffers.
+- The socket is chmodded to 0600 just after it starts listening; in the default
+  0700 directory that gap doesn't matter.
 
 ## Why
 
@@ -481,20 +575,18 @@ isolating failures.
 ## Build order
 
 1. ~~**Headless bridge test.**~~ Passed 2026-10-29; see above.
-2. **The daemon and the protocol.** The wire format and transport options are in
-   `todos/wire-format.md`, waiting on Will. Pass the client's environment through
-   (below). A headless client is enough to prove it.
-3. **The TUI client.** Load settings, keybindings and theme with pi's exported
-   managers. References: v1.0.0's `tui.ts`, which rendered `viewState()` (gone in
-   1.5, so a port means moving it to `watch()` and `ConversationTranscript`), and
-   p2's TUI (`apps/p2/src/hosts/tui.ts` and its plugins' `tui.ts` facets), which is
-   current but built on Chord v2.
-4. **Vanilla parity.** Build in this order:
+2. ~~**The daemon and the protocol.**~~ Built 2026-11-13, as the thin slice (below).
+3. ~~**The TUI client.**~~ A minimal one, in the thin slice (below). For more:
+   v1.0.0's `tui.ts`, which rendered `viewState()` (gone in 1.5, so a port means
+   moving it to `watch()` and `ConversationTranscript`), and p2's TUI
+   (`apps/p2/src/hosts/tui.ts` and its plugins' `tui.ts` facets), which is current but
+   built on Chord v2.
+4. **Vanilla parity.** Parked by the thin slice: build only what daily use asks for,
+   and wait for p3 for the rest. The list, for reference:
    - the prompt: pi's system prompt sections, AGENTS.md, and skills (ketch's
-     included), from `DefaultResourceLoader` and `loadSkills`. Started in
-     `src/prompt.ts`. The bridge forwards only the portable parts (context files,
-     skills, custom sections), so pi's own sections matter only if pi-claude-code
-     (Open question 2) or another provider is used.
+     included), from `DefaultResourceLoader` and `loadSkills`. `src/prompt.ts` has a
+     one-line preamble, AGENTS.md, skills and the directory; pi-claude-code sends it
+     as it is, so pi's own sections would now reach Claude.
    - `/new`, `/resume` picker, `--continue`
    - `/fork`, `/tree`
    - the footer (tokens, cost, context, quota)
@@ -557,13 +649,19 @@ isolating failures.
 
 ## Done when (PoC)
 
+As written on 2026-10-28, with where the thin slice stands (2026-11-13):
+
 - `pi` in two tmux panes, in two projects, runs two sessions at once through one
-  daemon, with the devenv environment each pane had.
+  daemon, with the devenv environment each pane had. *Built; the two-project case is
+  covered by the offline tests, the environment by one of them, not yet by daily use.*
 - A claude-bridge turn with tools, interrupted by `systemctl --user restart`,
-  finishes after the restart without being asked again.
+  finishes after the restart without being asked again. *Done by hand with
+  pi-claude-code and a SIGTERM; there's no unit yet.*
 - The flows used day to day work as in vanilla pi: prompt, steer, follow-up, Esc,
   `/model`, thinking, `/compact`, `/new`, `/resume`, `/fork`, `/tree`, `!`, `@file`.
-- Classic `pi` still works alongside it.
+  *Prompt, steer, follow-up, Esc, thinking, `/compact`, `/new` and `/resume` are
+  built; the rest is parked (Build order, step 4).*
+- Classic `pi` still works alongside it. *Untouched.*
 
 When it lands, the setup goes in `README.md` here and in a dotfiles module README,
 and this file and its entry in `todos/README.md` are deleted.

@@ -10,20 +10,18 @@ spec here is deleted. A file sitting in this directory means the work has not be
 
 ## Open
 
-**[poc.md](poc.md) — the proof of concept: daemon, protocol, TUI client, vanilla parity**
-Step 1, the gate, passed on 2026-10-29 with pi-claude-bridge, and on pi 1.5.2 with
-Earendil's pi-claude-code on 2026-11-13 (39/39), which replaced the bridge that day.
-Next is a very thin slice (Will, 2026-11-13): a daemon, a Unix socket and a minimal
-terminal client, while Earendil's Pi Roam takes shape. Packaging and the home-manager
-module (step 5) are tracked in dotfiles' `todos/pi-durable.md`.
+**[poc.md](poc.md) — the proof of concept: a thin slice, then what daily use asks for**
+The gate passed on 2026-10-29 with pi-claude-bridge, and on pi 1.5.2 with Earendil's
+pi-claude-code on 2026-11-13 (39/39), which replaced the bridge that day. The thin
+slice Will chose that day is built: `pier daemon`, a Unix socket, and a minimal
+terminal client, checked offline and by hand with real Claude. Next: daily use, and
+packaging in dotfiles' `todos/pi-durable.md`. The rest waits on Earendil's Pi Roam.
 
-**[wire-format.md](wire-format.md) — wire format and transport: options to decide**
-An interim decision report for Will, revised for pi 1.5.2 on 2026-11-12. Compares the
-protocol options for step 2 (Durable's view plus commands, Chord v2's app kit, pi's
-RPC, ACP, bespoke; Durable's agent events were removed in 1.5), framing, and how
-clients reach the daemon (Unix socket, SSH, loopback, tailnet, a tunnel), with
-Earendil's own p2 as prior art, recommendations and five questions. Waiting on
-Will's answers.
+**[wire-format.md](wire-format.md) — wire format and transport: remote access still open**
+The option space for the protocol and for reaching the daemon (Unix socket, SSH,
+loopback, tailnet, a tunnel), with Earendil's p2 as prior art. The local part was
+settled for the thin slice on 2026-11-13; it stays as the reference for a web or
+phone client.
 
 ## Writing a spec
 

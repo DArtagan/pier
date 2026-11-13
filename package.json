@@ -5,13 +5,17 @@
 	"description": "pi on Pi Durable: one daemon per host, thin clients",
 	"license": "MIT",
 	"type": "module",
+	"bin": {
+		"pier": "src/cli.ts"
+	},
 	"engines": {
 		"node": ">=24"
 	},
 	"scripts": {
 		"check": "tsc --noEmit",
 		"test": "vitest run",
-		"gate": "node experiments/gate/run.ts"
+		"gate": "node experiments/gate/run.ts",
+		"pier": "node src/cli.ts"
 	},
 	"dependencies": {
 		"@earendil-works/chord": "1.5.2",
@@ -21,10 +25,12 @@
 		"@earendil-works/pi-durable": "1.5.2",
 		"@earendil-works/pi-schema": "1.5.2",
 		"@earendil-works/pi-tui": "1.5.2",
-		"jiti": "2.7.0"
+		"jiti": "2.7.0",
+		"ws": "8.21.0"
 	},
 	"devDependencies": {
 		"@types/node": "24.19.2",
+		"@types/ws": "8.18.2",
 		"typescript": "7.0.2",
 		"vitest": "5.0.5"
 	}

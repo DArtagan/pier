@@ -1,15 +1,16 @@
-# Wire format and transport: options for Will to decide
+# Wire format and transport: decided for the thin slice; remote access still open
 
 ## Opening prompt
 
-> Read `todos/wire-format.md`. Will has decided the questions at its end (his answers
-> are recorded under "Decided"). Fold the decisions into `todos/poc.md`'s step 2,
-> delete this file, and start building the daemon.
+> Read `todos/wire-format.md`. The local protocol is built (see "Decided" and
+> `todos/poc.md`, "The thin slice"). What's left here is remote access: a web or
+> phone client, and how it signs in. Check `apps/p3/docs/` on pi's `main` first; p3
+> may settle it. Then put the options to Will.
 
 **Interim spec**, written 2026-10-29 for Will to read and decide on, and **revised
-2026-11-12** against pi 1.5.2. It's a decision report, not a plan; nothing in it is
-built. When Will has answered the questions at the end, record his answers verbatim
-under "Decided", carry the result into `todos/poc.md`, and delete this file.
+2026-11-12** against pi 1.5.2. Questions 1–4 were settled for the thin slice on
+2026-11-13 (below). The option space for remote access stays here, as the reference
+for when a web or phone client is wanted; once that's decided, this file goes.
 
 Will, 2026-10-29: *"Please do a deep dive on wire formats, present the different
 approaches to me in a report"*, and on the transport (Unix socket now, tailnet
@@ -37,7 +38,19 @@ the option space for me."*
 
 ## Decided
 
-Nothing yet. Already decided elsewhere, and assumed here: one SQLite storage for all
+Will, 2026-11-13: *"Let's build the very thin slice."* Claude had described the slice
+as a daemon, a Unix socket and a minimal terminal client, so questions 1–4 below were
+taken as the recommendations, without Will answering them one by one:
+
+1. Durable's view plus commands (A).
+2. A minimal pier-owned envelope, not Chord v2.
+3. JSON in WebSocket messages.
+4. The Unix socket only, with SSH for other hosts.
+
+Question 5 (an ACP adapter) wasn't taken up. Built as `src/protocol.ts`; see
+`todos/poc.md`, "The thin slice".
+
+Already decided before: one SQLite storage for all
 conversations, the whole client environment passed through, and `/quit`, `/exit` and
 `/detach` as proposed (all Will, 2026-10-29; see `todos/poc.md`).
 

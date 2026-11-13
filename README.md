@@ -4,13 +4,36 @@ pi on [Pi Durable](https://earendil.com/posts/pi-durable): one daemon per host o
 every pi session, and terminals (later web and phone) attach to it as thin clients.
 Like a pier: it stays put, and boats tie up and cast off.
 
-**Status:** proof of concept. Step 1, the gate, passed: Claude runs on a Durable
-Harness through Claude Code, with your Claude subscription, including a crash mid-tool,
-Esc mid-tool, compaction and forks (pi 1.5.2, 2026-11-13). Next is a deliberately thin
-slice: a daemon, a Unix socket, and a minimal terminal client; see [`todos/`](todos/).
+**Status:** proof of concept, as a deliberately thin slice: a daemon, a Unix socket,
+and a minimal terminal client. Claude runs on a Durable Harness through Claude Code,
+with your Claude subscription, and survives a crash mid-tool, Esc, compaction and
+forks (pi 1.5.2, 2026-11-13). See [`todos/`](todos/) for what's next.
+
+## Use
+
+```bash
+pier daemon           # the daemon, in the foreground (packaged as a user service later)
+pier                  # in a project: continue its newest conversation, or start one
+pier new              # start a new one
+pier resume <id>      # attach to conversation <id>
+pier list [--all]     # conversations here (or everywhere)
+```
+
+Until it's packaged, `npm run pier -- <args>`, or `node src/cli.ts`. In the client,
+`/help` lists the keys and commands. Enter sends, and steers while Claude works;
+Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
+the run carries on. Any number of panes can attach to one conversation. Each
+conversation's tools run in its directory, with the environment of the last pane that
+attached to it.
+
+The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
+`$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
+(`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override them.
 
 ## Layout
 
+- `src/daemon.ts` runs the Harness and serves it on the socket; `src/protocol.ts` is what
+  goes over it; `src/client.ts` and `src/tui.ts` are the client; `src/cli.ts` is `pier`.
 - `src/providers/claude-code.ts` loads Earendil's
   [pi-claude-code](https://github.com/earendil-works/pi-claude-code), the provider that
   sends requests through Claude Code (below).
@@ -19,7 +42,8 @@ slice: a daemon, a Unix socket, and a minimal terminal client; see [`todos/`](to
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
-- `test/` holds offline tests, with a faux model in place of Claude.
+- `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
+  clients over a real socket, the prompt, and the provider's loading.
 - `todos/` holds specs for work not yet done.
 - `docs/releasing.md` says how release-please makes versions.
 
