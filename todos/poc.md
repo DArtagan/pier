@@ -4,7 +4,7 @@
 
 > Read `todos/poc.md`, starting with "The thin slice". It's built; what's left is
 > under "Not done yet" there, in the order given, and packaging in dotfiles
-> (`todos/pi-durable.md`). Keep to the slice's rules: nothing p3 will own, and
+> (`todos/pi-durable.md`). Work within `docs/principles.md`: nothing p3 will own, and
 > everything agent-side as Durable extensions and documents. Before building more,
 > check `apps/p3/docs/` on pi's `main` for what Earendil has decided since. Update
 > this spec as facts change.

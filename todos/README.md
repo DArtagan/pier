@@ -25,6 +25,9 @@ phone client.
 
 ## Writing a spec
 
+Every spec's work happens within `docs/principles.md`; a spec that needs to step
+outside it says so, and why, for Will to decide.
+
 What makes these useful when opened cold, months later:
 
 - **State what was verified and when.** "Verified 2026-10-21" beats an assertion

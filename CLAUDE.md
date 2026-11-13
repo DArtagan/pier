@@ -9,6 +9,10 @@ every session, and clients attach to it. TypeScript on Node 24, run directly wit
 Node's type stripping (no build step). Claude is reached through Claude Code, with
 Earendil's pi-claude-code provider. See `README.md` for the layout.
 
+**Read `docs/principles.md` first.** All work on pier happens within it: keep pier
+thin, build so it carries over to Earendil's p3, stay upstream-first and current, keep
+it local and minimal, back claims with evidence, and leave direction to Will.
+
 ## Commands
 
 - `direnv allow` once (or `devenv shell`): Node, npm install, and the git hooks.

@@ -46,6 +46,7 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
 - `todos/` holds specs for work not yet done.
+- `docs/principles.md` holds the principles all work on pier keeps to.
 - `docs/releasing.md` says how release-please makes versions.
 
 ## Commands
