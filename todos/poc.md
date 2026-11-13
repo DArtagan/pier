@@ -18,9 +18,7 @@ pi-claude-bridge **0.12.0**, which pier now pins, from their changelogs and sour
 read-only clone of each at its tag). The gate passed again; what changed is marked
 "(1.5)" or "(bridge 0.10–0.12)" below. nixpkgs ships pi 1.5.0 by then.
 
-## Open questions (2026-11-12)
-
-New since the decisions below; Will's to answer, alongside `todos/wire-format.md`:
+## Questions of 2026-11-12, answered 2026-11-13
 
 1. **pier, or Earendil's Pi Roam?** Earendil is designing exactly this project in
    the pi repo (see "Earendil's own direction" below): p2, a working but
@@ -29,14 +27,18 @@ New since the decisions below; Will's to answer, alongside `todos/wire-format.md
    (a local, time-boxed slice, built so its parts carry over) until p3 shows its
    shape, aiming to move onto it; or pause. Will asked on 2026-11-13 whether to wait
    a month, and how to build so tools and UIs migrate upstream; Claude's answer: wait,
-   or build only the thin local slice. Not decided.
+   or build only the thin local slice. **Will, 2026-11-13: *"Let's build the very thin
+   slice."***
 2. **pi-claude-bridge, or Earendil's pi-claude-code?** Will called the bridge
    indispensable (2026-10-28). Earendil now has its own Claude Code provider,
    `@earendil-works/pi-claude-code` (below), which runs on Durable with no shim at
    all. Will, 2026-11-13: *"seems like there's no downside to using Earendil's own
    pi-claude-code? And it would give us future compatibility."* It passed the same
    gate (39/39, 2026-11-13; below), with the prompt cache as good as the bridge's.
-   Switching pier to it, and deleting `src/bridge/`, waits on Will's go-ahead.
+   **Will, 2026-11-13: *"Yes, switch and drop."*** pier now uses pi-claude-code only;
+   the bridge and its shim are gone (in git history up to `dd44453`). Classic pi in
+   dotfiles keeps the bridge, which this doesn't change. Where this spec describes the
+   bridge below, it's the record of step 1.
 
 ## Why
 
@@ -53,7 +55,8 @@ Will's words, 2026-10-28:
 Will's words, 2026-10-28:
 
 - *"I'm okay with dropping or rebuilding all of the extensions, except for
-  pi-claude-bridge - that one's indispensable to my set-up."*
+  pi-claude-bridge - that one's indispensable to my set-up."* (Superseded
+  2026-11-13: pi-claude-code does the same job; see above.)
 - *"For a first proof-of-concept version, I'd be looking to get to
   as-close-as-possible to the vanilla pi experience/flows, but built on Durable."*
 - Asked whether tmux panes could share *"one user-wide service that's running the

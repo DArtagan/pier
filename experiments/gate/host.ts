@@ -1,10 +1,7 @@
 // Steps of the gate, in their own process so the driver can kill it, and in one
 // process so the provider's in-memory session state carries from step to step.
-//   node experiments/bridge-gate/host.ts <state-dir> '<steps as a JSON array>'
+//   node experiments/gate/host.ts <state-dir> '<steps as a JSON array>'
 // Prints JSON lines: each conversation's agent events, and a `result` per step.
-// PIER_GATE_PROVIDER picks the Claude Code provider: `bridge` (pi-claude-bridge through
-// the shim; the default) or `claude-code` (Earendil's pi-claude-code, with no shim).
-// PIER_GATE_NO_REWRITE_MARK=1 turns off the shim's history-rewrite mark, as a control.
 import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -25,8 +22,6 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { loadBridge } from "../../src/bridge/load.ts";
-import { type BridgeShim, createBridgeShim } from "../../src/bridge/shim.ts";
 import { createPrompt } from "../../src/prompt.ts";
 import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../../src/providers/claude-code.ts";
 
@@ -53,32 +48,13 @@ const conversations: Record<string, ConversationId> = existsSync(statePath)
 const context = BACKGROUND_CONTEXT;
 const out = (line: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
-const provider = process.env.PIER_GATE_PROVIDER === "claude-code" ? "claude-code" : "bridge";
-const model =
-	provider === "claude-code"
-		? { provider: CLAUDE_CODE_PROVIDER, modelId: "claude-opus-5-5" }
-		: { provider: "claude-bridge", modelId: "claude-opus-5-5" };
+const model = { provider: CLAUDE_CODE_PROVIDER, modelId: "claude-opus-5-5" };
 const models = await ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
-const prompt = createPrompt();
+models.registerNativeProvider(await loadClaudeCodeProvider());
+out({ t: "provider", models: models.getModels(CLAUDE_CODE_PROVIDER).map((entry) => entry.id) });
 const registry = createRegistry();
 registry.install(CodingTools);
-registry.install(prompt.extension);
-let shim: BridgeShim | undefined;
-if (provider === "claude-code") {
-	models.registerNativeProvider(await loadClaudeCodeProvider());
-	out({ t: "provider", provider, models: models.getModels(CLAUDE_CODE_PROVIDER).map((entry) => entry.id) });
-} else {
-	const bridge = await loadBridge();
-	shim = createBridgeShim(bridge, {
-		models,
-		promptOptions: ({ cwd }) => prompt.options(cwd),
-		notify: (message, type) => out({ t: "notify", type, message }),
-		log: (message) => out({ t: "shim", message }),
-		markRewrites: process.env.PIER_GATE_NO_REWRITE_MARK !== "1",
-	});
-	registry.install(shim.extension);
-	out({ t: "provider", provider, root: bridge.root, events: shim.events, droppedTools: shim.droppedTools });
-}
+registry.install(createPrompt());
 
 const harness = await Harness.open(
 	await openNodeSqliteStorage(join(stateDir, "pier.sqlite")),
@@ -95,8 +71,6 @@ const harness = await Harness.open(
 	},
 	context,
 );
-// PIER_GATE_NO_RUN_END=1 leaves the shim unattached, so runs ending go unseen, as a control.
-if (process.env.PIER_GATE_NO_RUN_END !== "1") shim?.attach(harness);
 
 let abortTrigger: { conversation: Conversation; match: string } | undefined;
 
@@ -203,7 +177,6 @@ for (const step of steps) {
 	writeFileSync(statePath, JSON.stringify(conversations, null, "\t"));
 }
 for (const stream of watched.values()) await stream.stop();
-await shim?.shutdown();
 // Releases per-session provider state, such as the warm Claude Code process pi-claude-code
 // keeps for each conversation. pi does this when a session ends; Durable never does, and
 // without it that process outlives its 5-minute limit and keeps this one running.

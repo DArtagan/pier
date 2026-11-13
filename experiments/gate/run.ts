@@ -1,54 +1,28 @@
-// The gate (step 1 in todos/): a Claude Code provider on a Durable Harness, against the
-// real Claude Code. Each group of steps runs host.ts in its own process; steps in one
-// group share the provider's in-memory session state.
-//   npm run gate                                  pi-claude-bridge, through the shim
-//   PIER_GATE_PROVIDER=claude-code npm run gate   Earendil's pi-claude-code, no shim
-// Each uses your Claude Code login: about twenty Opus turns, and a 6-minute idle
-// (PIER_GATE_IDLE_MINUTES; 0 skips it). Leaves its state directory behind and prints
-// its path, with the bridge's debug log.
+// The gate (step 1 in todos/): pi-claude-code on a Durable Harness, against the real
+// Claude Code. Each group of steps runs host.ts in its own process; steps in one group
+// share the provider's in-memory state.
+//   npm run gate
+// It uses your Claude Code login (`claude` on the PATH, or PI_CLAUDE_CODE_COMMAND):
+// about twenty Opus turns, and a 6-minute idle (PIER_GATE_IDLE_MINUTES; 0 skips it).
+// Leaves its state directory behind and prints its path.
 import { spawn } from "node:child_process";
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readdirSync,
-	readFileSync,
-	readlinkSync,
-	writeFileSync,
-} from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Step } from "./host.ts";
 
 type Line = Record<string, unknown> & { t: string };
 
-const PROVIDER = process.env.PIER_GATE_PROVIDER === "claude-code" ? "claude-code" : "bridge";
-const bridge = PROVIDER === "bridge";
 const IDLE_MINUTES = Number(process.env.PIER_GATE_IDLE_MINUTES ?? "6");
 const MARKER = "PINEAPPLE";
 const stateDir = mkdtempSync(join(tmpdir(), "pier-gate-"));
 const workspace = join(stateDir, "workspace");
-const bridgeLog = join(stateDir, "bridge.log");
-// pi's agent dir for the gate alone: since 0.10 the bridge keeps per-session state
-// there (claude-bridge/sessions/), which would otherwise land in your real one. It
-// still needs your claude-bridge.json, for the Claude Code executable.
+// pi's agent dir for the gate alone, so nothing it does lands in your real one.
 const agentDir = join(stateDir, "agent");
 mkdirSync(workspace);
 mkdirSync(agentDir);
-copyFileSync(join(homedir(), ".pi/agent/claude-bridge.json"), join(agentDir, "claude-bridge.json"));
-// pi-claude-code runs the Claude Code named here; on NixOS, the one the bridge is set up with.
-const claudeCommand =
-	process.env.PI_CLAUDE_CODE_COMMAND ??
-	(
-		JSON.parse(readFileSync(join(agentDir, "claude-bridge.json"), "utf8")) as {
-			provider?: { pathToClaudeCodeExecutable?: string };
-		}
-	).provider?.pathToClaudeCodeExecutable ??
-	"claude";
-console.log(`provider: ${PROVIDER}`);
 // The model never reads this file in the gate, so the marker in its answers can only
-// have come from the context files the bridge forwards to Claude Code.
+// have come from the system prompt.
 writeFileSync(
 	join(workspace, "AGENTS.md"),
 	`# Instructions\n\nEnd every final answer with the word ${MARKER} on its own line.\n`,
@@ -70,13 +44,6 @@ interface Run {
 	lines: Line[];
 	/** One per finished step, in order. */
 	results: Line[];
-	/**
-	 * The bridge's session sync decisions, one per fresh Claude Code query: clean-start (no
-	 * history), rebuild (import Durable's history), fork or prefix-write (keep Claude Code's
-	 * matching records, add the rest), or reuse (resume as is).
-	 */
-	paths: string[];
-	log: string;
 	signal: NodeJS.Signals | null;
 	/** Processes (the host's, and the workspace's) that outlived a kill of the host's process group. */
 	survivors: string[];
@@ -91,16 +58,11 @@ function host(
 	steps: Step[],
 	options: { kill?: (line: Line) => boolean; killWhen?: () => boolean; env?: Record<string, string> } = {},
 ): Promise<Run> {
-	const from = existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8").length : 0;
 	return new Promise((resolve) => {
 		const child = spawn(process.execPath, [join(import.meta.dirname, "host.ts"), stateDir, JSON.stringify(steps)], {
 			env: {
 				...process.env,
-				CLAUDE_BRIDGE_DEBUG: "1",
-				CLAUDE_BRIDGE_DEBUG_PATH: bridgeLog,
 				PI_CODING_AGENT_DIR: agentDir,
-				PI_CLAUDE_CODE_COMMAND: claudeCommand,
-				PIER_GATE_PROVIDER: PROVIDER,
 				...options.env,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
@@ -158,9 +120,7 @@ function host(
 		child.stderr.on("data", (chunk: Buffer) => transcript.push(`[${group} stderr] ${chunk}`));
 		child.on("exit", (_code, signal) => {
 			clearTimeout(guard);
-			const log = existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8").slice(from) : "";
-			const paths = [...log.matchAll(/syncResult: path=(\S+)/g)].map((match) => match[1] ?? "");
-			resolve({ lines, results: lines.filter((line) => line.t === "result"), paths, log, signal, survivors });
+			resolve({ lines, results: lines.filter((line) => line.t === "result"), signal, survivors });
 		});
 	});
 }
@@ -254,14 +214,6 @@ const usageOf = (result: Line | undefined): string => {
 	const result = resumed.results[0];
 	check(group, "turn finished after restart, unprompted", done(result), String(result?.reason ?? ""));
 	check(group, "AGENTS.md still reached Claude Code", marked(result));
-	if (bridge) {
-		check(
-			group,
-			"Claude Code got Durable's history after the restart",
-			resumed.paths.length > 0 && !resumed.paths.includes("clean-start"),
-			resumed.paths.join(","),
-		);
-	}
 	const interrupted = resumed.lines.find((line) => line.t === "tool_end" && line.isError === true);
 	check(
 		group,
@@ -295,33 +247,17 @@ const usageOf = (result: Line | undefined): string => {
 		aborted?.status === "unanswered" && aborted.reason === "aborted",
 		`${aborted?.status} ${aborted?.reason}`,
 	);
-	if (bridge) {
-		check(group, "the bridge closed its Claude Code query", /for-await loop exited, wasAborted=true/.test(run.log));
-	}
 	const claudes = ((processes?.descendants as string[] | undefined) ?? []).filter((line) => line.includes("claude"));
 	check(group, "no Claude Code process left running after the abort", claudes.length === 0, claudes.join("; "));
 	const left = (processes?.processes as string[] | undefined) ?? ["(no result)"];
 	check(group, "nothing left running in the workspace while the daemon lives on", left.length === 0, left.join("; "));
 	check(group, "next turn answered", done(after), String(after?.reason ?? ""));
-	if (bridge) {
-		check(
-			group,
-			"next turn was a fresh query, not one re-entering a parked query",
-			!run.log.includes("isReentrant=true"),
-		);
-		check(
-			group,
-			"the next turn didn't resume the aborted query's session as is",
-			run.paths.at(-1) !== "reuse" && run.paths.at(-1) !== "clean-start",
-			run.paths.join(","),
-		);
-	}
 	check(group, "AGENTS.md still reached Claude Code", marked(after));
 	note(`answer: ${JSON.stringify(text(after))}`);
 }
 
-// 4. Compact mid-conversation and continue, in one process, so the bridge holds a
-//    Claude Code session it could wrongly keep resuming.
+// 4. Compact mid-conversation and continue, in one process, so the provider holds a
+//    warm Claude Code process it could wrongly keep continuing.
 {
 	const group = "compact";
 	const run = await host(group, [
@@ -333,9 +269,6 @@ const usageOf = (result: Line | undefined): string => {
 	const [warm1, warm2, compacted, after] = run.results;
 	check(group, "turns before compaction answered", done(warm1) && done(warm2));
 	check(group, "the second turn read most of its input from the cache", cached(warm2) >= 0.5, usageOf(warm2));
-	if (bridge) {
-		check(group, "bridge resumed its Claude Code session between turns", run.paths[1] === "reuse", run.paths.join(","));
-	}
 	const outcome = compacted?.outcome as { status: string; result?: { submissionId?: unknown } } | undefined;
 	check(
 		group,
@@ -343,16 +276,6 @@ const usageOf = (result: Line | undefined): string => {
 		outcome?.status === "completed" && outcome.result?.submissionId !== undefined,
 		JSON.stringify(outcome),
 	);
-	if (bridge) {
-		check(group, "summary went through the bridge's isolated path", run.log.includes("routed to isolated summary"));
-		check(group, "shim marked the rewrite", run.log.includes("session_compact:rewrite"));
-		check(
-			group,
-			"bridge didn't resume stale history after the compaction",
-			run.paths[2] !== undefined && run.paths[2] !== "reuse" && run.paths[2] !== "clean-start",
-			run.paths.join(","),
-		);
-	}
 	check(group, "turn after compaction answered", done(after));
 	check(
 		group,
@@ -401,14 +324,6 @@ const usageOf = (result: Line | undefined): string => {
 	] as const) {
 		check(group, `${name}'s second turn read most of its input from the cache`, cached(result) >= 0.5, usageOf(result));
 	}
-	if (bridge) {
-		check(
-			group,
-			"each branch's second turn resumed its own Claude Code session",
-			run.paths[2] === "reuse" && run.paths[3] === "reuse",
-			run.paths.join(","),
-		);
-	}
 }
 
 // 6. The prompt cache across an idle conversation: two turns back to back, then a pause
@@ -427,35 +342,13 @@ if (IDLE_MINUTES > 0) {
 	note(`first turn in a new process: ${usageOf(first)}`);
 	note(`straight after: ${usageOf(second)}`);
 	note(`after ${IDLE_MINUTES} minutes idle: ${usageOf(third)}`);
-	if (bridge) note(`sync paths: ${run.paths.join(",")}`);
 }
 
-// 7. Control: the same compaction without the shim's rewrite mark. Not a check of the
-//    shim; it shows what the mark prevents.
-if (bridge) {
-	const group = "control";
-	const run = await host(
-		group,
-		[
-			turn("root", "control-1", noTools("in one sentence, what is in notes.txt?")),
-			{ op: "compact", conv: "root", instructions: "Keep the names of files created and their exact contents." },
-			turn("root", "control-2", noTools("what were the three lines you wrote to notes.txt?")),
-		],
-		{ env: { PIER_GATE_NO_REWRITE_MARK: "1" } },
-	);
-	const outcome = run.results[1]?.outcome as { status: string; result?: { submissionId?: unknown } } | undefined;
-	note(
-		`without the mark: compaction ${outcome?.result?.submissionId === undefined ? "made no summary" : "made a summary"}; sync paths ${run.paths.join(",")}`,
-	);
-	note(`answer: ${JSON.stringify(text(run.results[2]))}`);
-}
-
-// 8. Across every run.
+// 7. Across every run.
 {
 	const group = "all";
-	const everything = `${transcript.join("\n")}\n${existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8") : ""}`;
-	check(group, "no prompt-capture failure", !/prompt-capture|prompt_capture_unresolved/.test(everything));
-	check(group, "no 'out of extra usage'", !/extra usage/i.test(everything));
+	// pi-claude-code fails a turn billed to Extra Usage with a "Claude Code billing" error.
+	check(group, "nothing billed to Extra Usage", !/extra usage|Claude Code billing/i.test(transcript.join("\n")));
 	const errors = transcript.filter((line) => line.includes('"errorMessage"'));
 	check(group, "no assistant errors", errors.length === 0, errors.join("\n"));
 	const reports = transcript.filter((line) => line.includes('"t":"report"'));

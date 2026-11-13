@@ -1,6 +1,5 @@
-// The system prompt: context files (AGENTS.md) and skills, discovered as pi does, plus the
-// working directory. pi's own harness text is deliberately absent: claude-bridge runs
-// Claude Code with its own preset and forwards only these portable parts.
+// The system prompt: a short preamble, context files (AGENTS.md) and skills, discovered
+// as pi does, and the working directory. pi-claude-code sends it to Claude as it is.
 import {
 	formatSkillsForPrompt,
 	getAgentDir,
@@ -8,7 +7,6 @@ import {
 	loadSkills,
 } from "@earendil-works/pi-coding-agent";
 import { defineExtension, type Extension, section } from "@earendil-works/pi-durable";
-import type { SystemPromptOptions } from "./bridge/shim.ts";
 
 export interface PromptOptions {
 	agentDir?: string;
@@ -16,20 +14,15 @@ export interface PromptOptions {
 	skillPaths?: string[];
 }
 
-export interface Prompt {
-	readonly extension: Extension;
-	/** The same parts as the sections, for the bridge's prompt capture. */
-	options(cwd: string): SystemPromptOptions;
-}
-
-export function createPrompt(options: PromptOptions = {}): Prompt {
+/** The prompt's sections, as an extension to install in the Harness registry. */
+export function createPrompt(options: PromptOptions = {}): Extension {
 	const agentDir = options.agentDir ?? getAgentDir();
 	const parts = (cwd: string) => ({
 		contextFiles: loadProjectContextFiles({ cwd, agentDir }),
 		skills: loadSkills({ cwd, agentDir, skillPaths: options.skillPaths ?? [], includeDefaults: true }).skills,
 	});
 
-	const extension = defineExtension({
+	return defineExtension({
 		name: "pier.prompt",
 		sections: [
 			section("preamble", () => "You are a coding agent. Use the tools to inspect and change the project.", {
@@ -55,6 +48,4 @@ export function createPrompt(options: PromptOptions = {}): Prompt {
 			section("cwd", (input) => input.agent.cwd),
 		],
 	});
-
-	return { extension, options: (cwd) => parts(cwd) };
 }
