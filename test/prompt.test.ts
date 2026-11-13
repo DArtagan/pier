@@ -11,7 +11,12 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPrompt } from "../src/prompt.ts";
-import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../src/providers/claude-code.ts";
+import {
+	CLAUDE_CODE_PROVIDER,
+	ConversationDirectories,
+	inConversationDirectories,
+	loadClaudeCodeProvider,
+} from "../src/providers/claude-code.ts";
 
 const context = BACKGROUND_CONTEXT;
 
@@ -61,6 +66,40 @@ describe("prompt", () => {
 	it("leaves the project context out when there's none", async () => {
 		const prompt = await firstSystemPrompt(dir);
 		expect(prompt).not.toContain("AGENTS.md");
+	});
+});
+
+describe("conversation directories", () => {
+	it("runs each request with process.cwd() at its conversation's directory, and nothing else", async () => {
+		const dirs = [await mkdtemp(join(tmpdir(), "pier-cwd-a-")), await mkdtemp(join(tmpdir(), "pier-cwd-b-"))];
+		const seen: string[] = [];
+		const faux = fauxProvider();
+		const answer = async () => {
+			// As pi-claude-code reads it, after an await inside the request.
+			await new Promise((resolve) => setTimeout(resolve, 1));
+			seen.push(process.cwd());
+			return fauxAssistantMessage("ok");
+		};
+		faux.setResponses([answer, answer]);
+		const models = createModels();
+		models.setProvider(inConversationDirectories(faux.provider));
+		const registry = createRegistry();
+		registry.install(ConversationDirectories);
+		const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
+		try {
+			for (const cwd of dirs) {
+				const conversation = await harness.createConversation(
+					{ ownership: { kind: "ownerless" }, agent: { model: { provider: "faux", modelId: "faux-1" }, cwd } },
+					context,
+				);
+				await (await conversation.submit({ type: "input", content: "hi" }, context)).wait(context);
+			}
+		} finally {
+			await harness.close(context);
+			for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+		}
+		expect(seen).toEqual(dirs);
+		expect(dirs).not.toContain(process.cwd());
 	});
 });
 

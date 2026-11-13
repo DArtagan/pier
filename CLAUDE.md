@@ -66,8 +66,11 @@ Earendil's pi-claude-code provider. See `README.md` for the layout.
 - Call pi-ai's `cleanupSessionResources(sessionId)` when a conversation goes idle or the
   host closes: Durable never does, and a conversation's warm Claude Code process
   otherwise lingers (it kept a gate host alive for 40 minutes).
-- Claude Code runs in the host's working directory, detached in a process group of its
-  own.
+- It starts Claude Code in `process.cwd()`, and Claude Code reports that to the model as
+  its working directory. pier wraps the provider so that, inside a request,
+  `process.cwd()` is the conversation's directory, which `ConversationDirectories`
+  records; install that extension wherever the provider runs. Claude Code runs
+  detached, in a process group of its own.
 
 ## Specs
 

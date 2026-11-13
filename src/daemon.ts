@@ -37,6 +37,7 @@ import {
 	type Request,
 	type Response,
 } from "./protocol.ts";
+import { ConversationDirectories } from "./providers/claude-code.ts";
 
 /**
  * The environment of the client that last attached to a conversation. Its tools run with
@@ -100,6 +101,8 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	await claimSocket(options.socketPath);
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	// pi-claude-code runs Claude Code in the directory this records for each conversation.
+	registry.install(ConversationDirectories);
 	for (const extension of options.extensions ?? [createPrompt()]) registry.install(extension);
 
 	const harness = await Harness.open(

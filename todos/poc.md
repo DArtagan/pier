@@ -54,8 +54,12 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
   `$XDG_RUNTIME_DIR/pier/pier.sock` (0600, in a 0700 directory), and refuses to start
   when another daemon answers there. `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
   (`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override.
-  It runs in its state directory, since Claude Code tells the model about its working
-  directory (the first manual run had it puzzling over pier's own git worktree).
+  Claude Code runs in each conversation's directory, which it reports to the model:
+  pi-claude-code starts it in `process.cwd()`, so pier answers that with the
+  conversation's directory inside each request (`src/providers/claude-code.ts`). First
+  the daemon ran Claude Code in pier's own git worktree, and Claude puzzled over it;
+  then in the state directory, and Claude noticed that didn't match (Will, 2026-11-13).
+  The daemon still runs in its state directory, for anything outside a request.
 - **The protocol** (`src/protocol.ts`): JSON in WebSocket messages over the Unix
   socket. Requests with ids and one response each: `hello` (versions must match),
   `attach`, `detach`, `submit`, `abort`, `compact`, `configure`, `list`, `entries`. An
@@ -456,7 +460,9 @@ Three things a daemon on it must handle:
 - **Claude Code runs in the host's directory** (`process.cwd()`), not the
   conversation's. pi runs the tools, and pier's prompt names the conversation's
   directory, so the gate wasn't affected; Claude Code's own environment block names
-  the daemon's directory.
+  the daemon's directory. Handled since 2026-11-13 by running each request in a
+  scope where `process.cwd()` is the conversation's directory (see "The thin slice").
+  Worth raising upstream: a provider option, such as a directory per session id.
 - **It spawns Claude Code detached**, like Durable's tools, so only a control-group
   kill reaps it if the daemon dies.
 

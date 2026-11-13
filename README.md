@@ -75,8 +75,12 @@ Things a host must know, all found by the gate:
   per conversation for straight continuations, and frees it when pi-ai's
   `cleanupSessionResources(sessionId)` is called with the conversation's provider
   session id. pi does that when a session ends; Durable never does.
-- **Claude Code runs in the host's directory**, not the conversation's. The prompt
-  names the conversation's directory, and Durable runs the tools there.
+- **Claude Code would run in the host's directory**, which it reports to the model as
+  its working directory: pi-claude-code starts it in `process.cwd()`, and nothing in a
+  request names a directory. pier's `ConversationDirectories` extension records each
+  conversation's directory before its requests, and the provider pier loads runs each
+  request in a scope where `process.cwd()` answers it (`src/providers/claude-code.ts`).
+  A provider option upstream would replace that.
 - **It spawns Claude Code detached**, as Durable spawns tools, so only a control-group
   kill reaps them if the host dies.
 - **The prompt cache** survives an idle conversation for up to an hour: every entry is

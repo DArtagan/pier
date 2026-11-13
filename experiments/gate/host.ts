@@ -23,7 +23,11 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { createPrompt } from "../../src/prompt.ts";
-import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../../src/providers/claude-code.ts";
+import {
+	CLAUDE_CODE_PROVIDER,
+	ConversationDirectories,
+	loadClaudeCodeProvider,
+} from "../../src/providers/claude-code.ts";
 
 export type Step =
 	/** `abortOnTool`: abort the conversation, as Esc does, once a tool call's arguments contain this. */
@@ -54,6 +58,7 @@ models.registerNativeProvider(await loadClaudeCodeProvider());
 out({ t: "provider", models: models.getModels(CLAUDE_CODE_PROVIDER).map((entry) => entry.id) });
 const registry = createRegistry();
 registry.install(CodingTools);
+registry.install(ConversationDirectories);
 registry.install(createPrompt());
 
 const harness = await Harness.open(

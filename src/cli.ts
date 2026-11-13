@@ -88,9 +88,9 @@ async function daemon(): Promise<number> {
 	const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
 	const state = stateDir();
 	await mkdir(state, { recursive: true, mode: 0o700 });
-	// pi-claude-code runs Claude Code in this process's directory, and Claude Code tells
-	// the model about it (git status included). The state directory says nothing about any
-	// project; the conversation's own directory is in pier's prompt.
+	// pi-claude-code runs Claude Code in the conversation's directory (ConversationDirectories),
+	// and in this process's otherwise, telling the model about it, git status included. The
+	// state directory says nothing about any project.
 	process.chdir(state);
 	const models = await ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
 	models.registerNativeProvider(await loadClaudeCodeProvider());
