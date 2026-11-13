@@ -11,16 +11,20 @@ spec here is deleted. A file sitting in this directory means the work has not be
 ## Open
 
 **[poc.md](poc.md) — the proof of concept: daemon, protocol, TUI client, vanilla parity**
-Step 1, the bridge gate, passed on 2026-10-29 (40/40 checks, Esc mid-tool included).
-Next is step 2: the daemon and its wire protocol, which waits on Will's decisions in
-`wire-format.md`. Packaging and the home-manager module (step 5) are tracked in
+Step 1, the bridge gate, passed on 2026-10-29, and again on pi 1.5.2 with
+pi-claude-bridge 0.12.0 on 2026-11-12 (42/42). Next is step 2: the daemon and its wire
+protocol, which waits on Will's decisions in `wire-format.md`, and on two new questions
+at the top of `poc.md` (pier or Earendil's Pi Roam; the bridge or Earendil's
+pi-claude-code). Packaging and the home-manager module (step 5) are tracked in
 dotfiles' `todos/pi-durable.md`.
 
 **[wire-format.md](wire-format.md) — wire format and transport: options to decide**
-An interim decision report for Will. Compares the protocol options for step 2 (Durable's
-view plus commands, Durable's agent events, Chord remote objects, pi's RPC, ACP,
-bespoke), framing, and how clients reach the daemon (Unix socket, SSH, loopback,
-tailnet), with recommendations and five questions. Waiting on Will's answers.
+An interim decision report for Will, revised for pi 1.5.2 on 2026-11-12. Compares the
+protocol options for step 2 (Durable's view plus commands, Chord v2's app kit, pi's
+RPC, ACP, bespoke; Durable's agent events were removed in 1.5), framing, and how
+clients reach the daemon (Unix socket, SSH, loopback, tailnet, a tunnel), with
+Earendil's own p2 as prior art, recommendations and five questions. Waiting on
+Will's answers.
 
 ## Writing a spec
 
