@@ -19,17 +19,22 @@ import type {
 } from "@earendil-works/pi-durable";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Which conversation `attach` opens. */
 export type AttachTarget =
 	| { readonly kind: "new" }
 	/** The newest conversation in the client's directory, or a new one if there's none. */
 	| { readonly kind: "continue" }
+	/** By the number pier gave it: #1, #2, … on this host. */
+	| { readonly kind: "number"; readonly number: number }
+	/** By Durable's own id, which clients use to reattach; it isn't shown to people. */
 	| { readonly kind: "id"; readonly id: ConversationId };
 
 export interface ConversationSummary {
 	readonly id: ConversationId;
+	/** pier's number for it, counting up from 1 on this host. Durable's ids share one counter with every entry and task, so they jump. */
+	readonly number: number;
 	readonly cwd?: string;
 	/** The first user message, cut short. */
 	readonly title?: string;
@@ -51,7 +56,7 @@ export interface Methods {
 			env: Record<string, string>;
 			window?: ConversationWindow;
 		};
-		result: { conversation: ConversationId; created: boolean };
+		result: { conversation: ConversationId; number: number; created: boolean };
 	};
 	detach: { params: Record<string, never>; result: Record<string, never> };
 	/** Send input. While a run is going, `steer` joins it and `followUp` (the default) waits for it. */

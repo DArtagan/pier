@@ -4,6 +4,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Context as RequestContext, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
@@ -12,7 +13,13 @@ import {
 	fauxProvider,
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
-import type { EntryRecord, LiveState, TranscriptView } from "@earendil-works/pi-durable";
+import {
+	createRegistry,
+	type EntryRecord,
+	Harness,
+	type LiveState,
+	type TranscriptView,
+} from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AttachedConversation, PierClient } from "../src/client.ts";
@@ -120,6 +127,51 @@ describe("daemon", () => {
 		const { conversations } = await connected.request("list", { cwd: dir });
 		expect(conversations.map((summary) => summary.id)).toEqual([first]);
 		expect(conversations[0]?.title).toBe("first conversation");
+	});
+
+	it("numbers conversations 1, 2, 3, whatever ran in between, and opens them by number", async () => {
+		await start([fauxAssistantMessage("first answer"), fauxAssistantMessage("second answer")]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		expect(conversation.number).toBe(1);
+		const first = conversation.id;
+		// A turn takes a dozen of Durable's ids (entries, tasks, documents) between conversations.
+		await connected.request("submit", { text: "one" });
+		await until(conversation, answered("first answer"));
+		await conversation.attach({ kind: "new" }, dir, {});
+		expect(conversation.number).toBe(2);
+		await connected.request("submit", { text: "two" });
+		await until(conversation, answered("second answer"));
+		await conversation.attach({ kind: "new" }, dir, {});
+		expect(conversation.number).toBe(3);
+
+		await conversation.attach({ kind: "number", number: 1 }, dir, {});
+		expect(conversation.id).toBe(first);
+		await until(conversation, answered("first answer"));
+		const { conversations } = await connected.request("list", { cwd: dir });
+		expect(conversations.map((summary) => summary.number).sort()).toEqual([1, 2, 3]);
+		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(/No conversation #9/);
+	});
+
+	it("numbers the conversations of a store from before numbers, oldest first", async () => {
+		const models = createModels();
+		const storage = await openNodeSqliteStorage(join(dir, "pier.sqlite"));
+		const harness = await Harness.open(storage, { models, registry: createRegistry() }, BACKGROUND_CONTEXT);
+		const older = await harness.createConversation(
+			{ ownership: { kind: "ownerless" }, agent: { cwd: dir } },
+			BACKGROUND_CONTEXT,
+		);
+		const newer = await harness.createConversation(
+			{ ownership: { kind: "ownerless" }, agent: { cwd: dir } },
+			BACKGROUND_CONTEXT,
+		);
+		await harness.close(BACKGROUND_CONTEXT);
+
+		await start([]);
+		const { client: connected } = await client();
+		const { conversations } = await connected.request("list", {});
+		const numbers = Object.fromEntries(conversations.map((summary) => [summary.id, summary.number]));
+		expect(numbers).toEqual({ [older.id]: 1, [newer.id]: 2 });
 	});
 
 	it("aborts a run that's waiting on the model", async () => {

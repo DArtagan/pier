@@ -91,6 +91,7 @@ export class AttachedConversation {
 	#view: ConversationView | undefined;
 	#current: TranscriptView | undefined;
 	#id: ConversationId | undefined;
+	#number: number | undefined;
 	#ended: string | undefined;
 
 	constructor(client: PierClient) {
@@ -101,6 +102,11 @@ export class AttachedConversation {
 
 	get id(): ConversationId | undefined {
 		return this.#id;
+	}
+
+	/** pier's number for the conversation, as people see it. */
+	get number(): number | undefined {
+		return this.#number;
 	}
 
 	/** The latest view, once the daemon sent one. */
@@ -125,6 +131,7 @@ export class AttachedConversation {
 		const window = resuming ? this.#transcript.resume : undefined;
 		const result = await this.#client.request("attach", { target, cwd, env, ...(window ? { window } : {}) });
 		this.#id = result.conversation;
+		this.#number = result.number;
 		return { created: result.created };
 	}
 

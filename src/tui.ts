@@ -37,7 +37,7 @@ const cyan = sgr(36, 39);
 const HELP = [
 	"Enter sends; while Claude works, it steers. Alt+Enter queues a follow-up instead.",
 	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty.",
-	"/new  /resume [n|id|all]  /earlier  /compact [instructions]  /thinking <level>",
+	"/new  /resume [all | <number>]  /earlier  /compact [instructions]  /thinking <level>",
 	"/detach (leave it running)  /quit (stop it, then leave)  /exit (wait for it, then leave)",
 ].join("\n");
 
@@ -69,7 +69,6 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	const rendered = new Map<EntryId, Component>();
 	let view: TranscriptView | undefined;
-	let listing: ConversationSummary[] = [];
 	let leaving: ((code: number) => void) | undefined;
 	let exitWhenIdle = false;
 	const noticeLines: string[] = [];
@@ -100,7 +99,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		for (const component of renderLive(live(), view.docs["pi.inbox"] as InboxState | undefined, markdownTheme)) {
 			transcript.addChild(component);
 		}
-		status.setText(statusLine(view, conversation.id));
+		status.setText(statusLine(view, conversation.number));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
 	};
@@ -113,7 +112,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		rendered.clear();
 		transcript.clear();
 		const { created } = await conversation.attach(target, options.cwd, options.env);
-		notify(dim(`${created ? "new conversation" : "conversation"} ${conversation.id} in ${options.cwd}`));
+		// The view can arrive before the reply that carries the number.
+		render();
+		notify(dim(`${created ? "new conversation" : "conversation"} #${conversation.number} in ${options.cwd}`));
 	};
 
 	const submit = async (text: string, whenBusy: "steer" | "followUp") => {
@@ -135,27 +136,21 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				await attach({ kind: "new" });
 				return;
 			case "resume": {
-				const chosen = /^\d+$/.test(argument) ? listing[Number(argument) - 1] : undefined;
-				if (chosen !== undefined) return attach({ kind: "id", id: chosen.id });
+				const number = /^#?(\d+)$/.exec(argument)?.[1];
+				if (number !== undefined) return attach({ kind: "number", number: Number(number) });
 				if (argument !== "" && argument !== "all") {
-					return attach({ kind: "id", id: Number(argument) as never });
+					notify(red("/resume takes a conversation's number, or all"));
+					return;
 				}
 				const { conversations } = await client.request("list", {
 					...(argument === "all" ? {} : { cwd: options.cwd }),
 					limit: 20,
 				});
-				listing = conversations;
 				notify(
 					conversations.length === 0
 						? dim("no conversations here; /resume all lists every directory")
-						: conversations
-								.map(
-									(summary, index) =>
-										`${dim(`${index + 1}.`)} ${summary.title ?? dim("(empty)")} ${dim(
-											`#${summary.id}${summary.busy ? " working" : ""}${argument === "all" ? ` ${summary.cwd ?? ""}` : ""}`,
-										)}`,
-								)
-								.join("\n") + dim("\n/resume <n> opens one"),
+						: conversations.map((summary) => summaryLine(summary, argument === "all")).join("\n") +
+								dim("\n/resume <number> opens one"),
 				);
 				return;
 			}
@@ -303,7 +298,13 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, markdown: Ma
 	return components;
 }
 
-function statusLine(view: TranscriptView, id: number | undefined): string {
+/** One conversation in a listing: its number, title, and where. */
+export function summaryLine(summary: ConversationSummary, withDirectory: boolean): string {
+	const where = withDirectory && summary.cwd !== undefined ? `  ${summary.cwd}` : "";
+	return `${bold(`#${summary.number}`)}  ${summary.title ?? dim("(empty)")}${dim(`${summary.busy ? "  working" : ""}${where}`)}`;
+}
+
+function statusLine(view: TranscriptView, number: number | undefined): string {
 	const agent = (view.docs["pi.agent"] ?? {}) as AgentState;
 	const usage = (view.docs["pi.usage"] ?? { models: {} }) as UsageState;
 	let tokens = 0;
@@ -317,7 +318,7 @@ function statusLine(view: TranscriptView, id: number | undefined): string {
 			model,
 			`thinking ${agent.thinkingLevel ?? "default"}`,
 			`${Math.round(tokens / 1000)}k tokens`,
-			`#${id ?? "?"}`,
+			`#${number ?? "?"}`,
 			agent.cwd ?? "",
 		].join(" · "),
 	);

@@ -2,7 +2,7 @@
 // pier: the daemon, and the terminal client that attaches to it.
 //   pier                 continue the newest conversation in this directory, or start one
 //   pier new             start a new conversation here
-//   pier resume <id>     attach to conversation <id>
+//   pier resume <n>      attach to conversation #<n>
 //   pier list [--all]    conversations here (or everywhere), newest first
 //   pier daemon          run the daemon in the foreground
 // The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock.
@@ -10,7 +10,6 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { ConversationId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { PierClient } from "./client.ts";
 import { startDaemon } from "./daemon.ts";
@@ -18,7 +17,7 @@ import { socketPath, stateDir } from "./paths.ts";
 import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "./providers/claude-code.ts";
 import { runTui } from "./tui.ts";
 
-const USAGE = `usage: pier [new | resume <id> | list [--all] | daemon]`;
+const USAGE = `usage: pier [new | resume <number> | list [--all] | daemon]`;
 
 async function main(args: string[]): Promise<number> {
 	const [command, ...rest] = args;
@@ -28,12 +27,12 @@ async function main(args: string[]): Promise<number> {
 		case "new":
 			return attach({ kind: "new" });
 		case "resume": {
-			const id = Number(rest[0]);
-			if (!Number.isInteger(id)) {
+			const number = Number(rest[0]?.replace(/^#/, ""));
+			if (!Number.isInteger(number) || number < 1) {
 				console.error(USAGE);
 				return 2;
 			}
-			return attach({ kind: "id", id: id as ConversationId });
+			return attach({ kind: "number", number });
 		}
 		case "list":
 			return list(rest.includes("--all"));
@@ -59,7 +58,7 @@ async function list(all: boolean): Promise<number> {
 		const { conversations } = await client.request("list", all ? {} : { cwd: process.cwd() });
 		for (const summary of conversations) {
 			const where = all ? `  ${summary.cwd ?? ""}` : "";
-			console.log(`#${summary.id}${summary.busy ? " (working)" : ""}  ${summary.title ?? "(empty)"}${where}`);
+			console.log(`#${summary.number}${summary.busy ? " (working)" : ""}  ${summary.title ?? "(empty)"}${where}`);
 		}
 		return 0;
 	} finally {

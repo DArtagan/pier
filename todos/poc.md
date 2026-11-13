@@ -63,7 +63,7 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
   operations, which the client applies with Chord's `applyImmutable`.
 - **The client** (`src/client.ts`, `src/tui.ts`): `pier` continues the newest
   conversation in the current directory (by latest entry), or starts one; `pier new`,
-  `pier resume <id>`, `pier list [--all]`. On pi-tui, with pi's Markdown and list
+  `pier resume <n>`, `pier list [--all]`. On pi-tui, with pi's Markdown and list
   themes: the transcript (user messages, Markdown answers, tool calls with the last
   lines of their output, first lines of thinking), live streaming and tool output,
   queued input, why a run failed, and a status line (working or ready, model,
@@ -71,7 +71,7 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
   - Enter sends, and steers while Claude works; Alt+Enter or Ctrl+Shift+Enter queues a
     follow-up. Esc stops the run. Ctrl+C clears the editor, or leaves when it's empty,
     as does Ctrl+D: leaving never stops the run.
-  - `/new`, `/resume [n|id|all]`, `/earlier` (older entries), `/compact
+  - `/new`, `/resume [all | <number>]`, `/earlier` (older entries), `/compact
     [instructions]`, `/thinking <level>`, `/detach`, `/quit` (stops the run, then
     leaves), `/exit` (waits for the run, then leaves), `/help`. So Ctrl+C on an empty
     prompt detaches, which was the open question.
@@ -82,13 +82,22 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
   keeps it; it's on disk in the daemon's private state directory.
 - **Releasing Claude Code processes:** five minutes after a conversation's run ends,
   the daemon calls `cleanupSessionResources()` for it, and for all of them on close.
+- **Conversation numbers:** #1, #2, … per host, kept in the session document
+  `pier.numbers` and assigned in the commit that creates a conversation. Durable's own
+  conversation ids come from one counter shared with every entry, task, submission
+  and document (`record_ids`), and id 1 is reserved for its root conversation, so the
+  first test conversation was #2 and the next would have been about #47 (Will noticed,
+  2026-11-13). Durable's ids stay internal: clients reattach by them. A store from
+  before numbers is numbered oldest first when the daemon starts.
 
 ### Checked
 
-- **Offline** (`test/daemon.test.ts`, faux model, real socket, 7 tests): a second
+- **Offline** (`test/daemon.test.ts`, faux model, real socket, 9 tests): a second
   client sees the first's run live; tools run with the attaching client's
-  environment; continue and list by directory; abort; conversations survive a
-  restart; a second daemon is refused; requests before attaching are refused.
+  environment; continue and list by directory; numbers count 1, 2, 3 with turns in
+  between, and open by number; an older store gets numbered; abort; conversations
+  survive a restart; a second daemon is refused; requests before attaching are
+  refused.
 - **By hand, 2026-11-13, with real Claude** (Opus 5.5 through pi-claude-code, tmux):
   a tool turn that followed AGENTS.md; detaching and continuing with the history;
   `/resume`; Esc while `sleep 60` ran (it stopped, and nothing was left running); a

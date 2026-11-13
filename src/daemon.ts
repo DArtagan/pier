@@ -53,6 +53,21 @@ export const ClientEnvDoc = defineDoc<{ vars: Record<string, string> }>({
 	checkpointWhen: () => true,
 });
 
+/**
+ * The numbers pier gives conversations, #1, #2, … on this host, by number. Durable's own
+ * conversation ids come from one counter shared with every entry, task and document, so
+ * the second conversation can be #47. A number is assigned in the commit that creates
+ * its conversation.
+ */
+export const NumbersDoc = defineDoc<{ last: number; conversations: Record<string, number> }>({
+	kind: "pier.numbers",
+	version: 1,
+	scope: "session",
+	initial: () => ({ last: 0, conversations: {} }),
+	// A base now and then, so a read replays a bounded number of changes.
+	checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 64,
+});
+
 export interface DaemonOptions {
 	socketPath: string;
 	storage: Storage;
@@ -137,6 +152,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	harness.resume();
 
 	const conversations = new ConversationAccess(harness, options);
+	await conversations.numberAll();
 	const connections = new Set<Connection>();
 	const server = createServer((_request, response) => {
 		response.writeHead(426, { "content-type": "text/plain" });
@@ -211,33 +227,70 @@ class ConversationAccess {
 		this.#options = options;
 	}
 
-	async open(target: AttachTarget, cwd: string): Promise<{ conversation: Conversation; created: boolean }> {
-		if (target.kind === "id") {
-			const conversation = await this.harness.conversation(target.id, context);
-			if (conversation === undefined) throw new Error(`No conversation ${target.id}`);
-			return { conversation, created: false };
+	async open(
+		target: AttachTarget,
+		cwd: string,
+	): Promise<{ conversation: Conversation; number: number; created: boolean }> {
+		if (target.kind === "id" || target.kind === "number") {
+			const numbers = await this.#numbers();
+			const id =
+				target.kind === "id" ? target.id : (numbers.conversations[target.number] as ConversationId | undefined);
+			const number = target.kind === "number" ? target.number : this.#numberOf(numbers, target.id);
+			const conversation = id === undefined ? undefined : await this.harness.conversation(id, context);
+			if (conversation === undefined || number === undefined) {
+				throw new Error(`No conversation ${target.kind === "number" ? `#${target.number}` : target.id}`);
+			}
+			return { conversation, number, created: false };
 		}
 		if (target.kind === "continue") {
 			const newest = (await this.list({ cwd, limit: 1 }))[0];
 			if (newest !== undefined) return this.open({ kind: "id", id: newest.id }, cwd);
 		}
+		let number = 0;
 		const conversation = await this.harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
 				agent: { model: this.#options.model, thinkingLevel: this.#options.thinkingLevel, cwd },
+				init: async (tx, id) => {
+					number = assign(await tx.doc(NumbersDoc), id);
+				},
 			},
 			context,
 		);
-		return { conversation, created: true };
+		return { conversation, number, created: true };
+	}
+
+	/** Number the top-level conversations that have no number yet, oldest first: those of a store from before numbers. */
+	async numberAll(): Promise<void> {
+		await this.harness.commit(async (tx) => {
+			const numbers = await tx.doc(NumbersDoc);
+			const numbered = new Set(Object.values(numbers.conversations));
+			const records = await tx.scanConversations({ order: "ascending" }, 10_000);
+			for (const record of records.items) {
+				if (record.owner === undefined && !numbered.has(record.id)) assign(numbers, record.id);
+			}
+		}, context);
+	}
+
+	async #numbers(): Promise<Readonly<{ last: number; conversations: Record<string, number> }>> {
+		return (await this.harness.snapshot(NumbersDoc, context)) ?? NumbersDoc.definition.initial();
+	}
+
+	#numberOf(numbers: { conversations: Record<string, number> }, id: ConversationId): number | undefined {
+		const found = Object.entries(numbers.conversations).find(([, conversation]) => conversation === id);
+		return found === undefined ? undefined : Number(found[0]);
 	}
 
 	/** Top-level conversations, most recently active first. */
 	async list(filter: { cwd?: string; limit?: number }): Promise<ConversationSummary[]> {
 		const records = await this.harness.commit((tx) => tx.scanConversations({ order: "descending" }, 500), context);
+		const numbers = await this.#numbers();
+		const byId = new Map(Object.entries(numbers.conversations).map(([number, id]) => [id, Number(number)]));
 		const found: (ConversationSummary & { activity: number })[] = [];
 		for (const record of records.items) {
-			// Subagents' conversations belong to their task, not to a person.
-			if (record.owner !== undefined) continue;
+			// Subagents' conversations belong to their task, not to a person, and have no number.
+			const number = byId.get(record.id);
+			if (record.owner !== undefined || number === undefined) continue;
 			const agent = await this.harness.snapshot(AgentDoc, record.id, context);
 			if (filter.cwd !== undefined && agent?.cwd !== filter.cwd) continue;
 			const conversation = await this.harness.conversation(record.id, context);
@@ -251,6 +304,7 @@ class ConversationAccess {
 			const live = await this.harness.snapshot(LiveDoc, record.id, context);
 			found.push({
 				id: record.id,
+				number,
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
@@ -260,6 +314,13 @@ class ConversationAccess {
 		found.sort((a, b) => b.activity - a.activity);
 		return found.slice(0, filter.limit ?? 50).map(({ activity: _activity, ...summary }) => summary);
 	}
+}
+
+/** Give conversation `id` the next number. */
+function assign(numbers: { last: number; conversations: Record<string, number> }, id: ConversationId): number {
+	numbers.last += 1;
+	numbers.conversations[numbers.last] = id;
+	return numbers.last;
 }
 
 /** One client connection, attached to at most one conversation at a time. */
@@ -332,7 +393,7 @@ class Connection {
 
 	async #attach(params: Methods["attach"]["params"]): Promise<Methods["attach"]["result"]> {
 		await this.detach();
-		const { conversation, created } = await this.#conversations.open(params.target, params.cwd);
+		const { conversation, number, created } = await this.#conversations.open(params.target, params.cwd);
 		await conversation.commit(async (tx) => {
 			(await tx.doc(ClientEnvDoc, conversation.id)).vars = { ...params.env };
 		}, context);
@@ -349,7 +410,7 @@ class Connection {
 			this.#log(`watch of conversation ${conversation.id} ended: ${end.kind}`);
 			this.#send({ event: "ended", conversation: conversation.id, reason: end.kind });
 		});
-		return { conversation: conversation.id, created };
+		return { conversation: conversation.id, number, created };
 	}
 
 	#conversation(): Conversation {

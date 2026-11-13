@@ -15,14 +15,15 @@ forks (pi 1.5.2, 2026-11-13). See [`todos/`](todos/) for what's next.
 pier daemon           # the daemon, in the foreground (packaged as a user service later)
 pier                  # in a project: continue its newest conversation, or start one
 pier new              # start a new one
-pier resume <id>      # attach to conversation <id>
+pier resume <n>       # attach to conversation #<n>
 pier list [--all]     # conversations here (or everywhere)
 ```
 
 Until it's packaged, `npm run pier -- <args>`, or `node src/cli.ts`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
-the run carries on. Any number of panes can attach to one conversation. Each
+the run carries on. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
+one conversation. Each
 conversation's tools run in its directory, with the environment of the last pane that
 attached to it.
 
