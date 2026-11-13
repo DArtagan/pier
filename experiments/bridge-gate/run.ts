@@ -1,8 +1,11 @@
-// The bridge gate (step 1 in todos/): pi-claude-bridge on a Durable Harness, through
-// the shim, against the real Claude Code. Each group of steps runs host.ts in its own
-// process; steps in one group share the bridge's in-memory session state.
-//   npm run gate            (uses your Claude Code login: about fifteen Opus turns)
-// Leaves its state directory behind and prints its path, with the bridge's debug log.
+// The gate (step 1 in todos/): a Claude Code provider on a Durable Harness, against the
+// real Claude Code. Each group of steps runs host.ts in its own process; steps in one
+// group share the provider's in-memory session state.
+//   npm run gate                                  pi-claude-bridge, through the shim
+//   PIER_GATE_PROVIDER=claude-code npm run gate   Earendil's pi-claude-code, no shim
+// Each uses your Claude Code login: about twenty Opus turns, and a 6-minute idle
+// (PIER_GATE_IDLE_MINUTES; 0 skips it). Leaves its state directory behind and prints
+// its path, with the bridge's debug log.
 import { spawn } from "node:child_process";
 import {
 	copyFileSync,
@@ -20,6 +23,9 @@ import type { Step } from "./host.ts";
 
 type Line = Record<string, unknown> & { t: string };
 
+const PROVIDER = process.env.PIER_GATE_PROVIDER === "claude-code" ? "claude-code" : "bridge";
+const bridge = PROVIDER === "bridge";
+const IDLE_MINUTES = Number(process.env.PIER_GATE_IDLE_MINUTES ?? "6");
 const MARKER = "PINEAPPLE";
 const stateDir = mkdtempSync(join(tmpdir(), "pier-gate-"));
 const workspace = join(stateDir, "workspace");
@@ -31,6 +37,16 @@ const agentDir = join(stateDir, "agent");
 mkdirSync(workspace);
 mkdirSync(agentDir);
 copyFileSync(join(homedir(), ".pi/agent/claude-bridge.json"), join(agentDir, "claude-bridge.json"));
+// pi-claude-code runs the Claude Code named here; on NixOS, the one the bridge is set up with.
+const claudeCommand =
+	process.env.PI_CLAUDE_CODE_COMMAND ??
+	(
+		JSON.parse(readFileSync(join(agentDir, "claude-bridge.json"), "utf8")) as {
+			provider?: { pathToClaudeCodeExecutable?: string };
+		}
+	).provider?.pathToClaudeCodeExecutable ??
+	"claude";
+console.log(`provider: ${PROVIDER}`);
 // The model never reads this file in the gate, so the marker in its answers can only
 // have come from the context files the bridge forwards to Claude Code.
 writeFileSync(
@@ -47,6 +63,8 @@ const check = (group: string, name: string, ok: boolean, detail?: string) => {
 };
 const note = (text: string) => console.log(`      ${text}`);
 const transcript: string[] = [];
+/** Groups whose host didn't exit by itself within its time limit, and was killed. */
+const hung: string[] = [];
 
 interface Run {
 	lines: Line[];
@@ -60,7 +78,7 @@ interface Run {
 	paths: string[];
 	log: string;
 	signal: NodeJS.Signals | null;
-	/** Processes in the workspace that outlived a kill of the host's process group. */
+	/** Processes (the host's, and the workspace's) that outlived a kill of the host's process group. */
 	survivors: string[];
 }
 
@@ -81,6 +99,8 @@ function host(
 				CLAUDE_BRIDGE_DEBUG: "1",
 				CLAUDE_BRIDGE_DEBUG_PATH: bridgeLog,
 				PI_CODING_AGENT_DIR: agentDir,
+				PI_CLAUDE_CODE_COMMAND: claudeCommand,
+				PIER_GATE_PROVIDER: PROVIDER,
 				...options.env,
 			},
 			stdio: ["ignore", "pipe", "pipe"],
@@ -93,6 +113,15 @@ function host(
 		const survivors: string[] = [];
 		let buffer = "";
 		let killed = false;
+		// Fifteen minutes, beyond any idle steps: a host that's still running then is stuck.
+		const idle = steps.reduce((total, step) => total + (step.op === "idle" ? step.ms : 0), 0);
+		const guard = setTimeout(
+			() => {
+				hung.push(group);
+				if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+			},
+			idle + 15 * 60_000,
+		);
 		child.stdout.on("data", (chunk: Buffer) => {
 			buffer += chunk.toString();
 			for (let newline = buffer.indexOf("\n"); newline !== -1; newline = buffer.indexOf("\n")) {
@@ -107,17 +136,28 @@ function host(
 					const poll = setInterval(() => {
 						if (options.killWhen !== undefined && !options.killWhen()) return;
 						clearInterval(poll);
+						// The host's tree before the kill: what's detached from its group is
+						// reparented after it, and can't be traced back to it.
+						const tree = descendantsOf(pid);
 						process.kill(-pid, "SIGKILL");
 						// What a process-group kill alone leaves running, then what the cgroup
 						// kill takes too.
-						survivors.push(...processesIn(workspace));
-						for (const line of survivors) process.kill(Number(line.split(" ")[0]), "SIGKILL");
+						const alive = (line: string) => existsSync(`/proc/${line.split(" ")[0]}`);
+						survivors.push(...new Set([...tree.filter(alive), ...processesIn(workspace)]));
+						for (const line of survivors) {
+							try {
+								process.kill(Number(line.split(" ")[0]), "SIGKILL");
+							} catch {
+								// Already gone.
+							}
+						}
 					}, 50);
 				}
 			}
 		});
 		child.stderr.on("data", (chunk: Buffer) => transcript.push(`[${group} stderr] ${chunk}`));
 		child.on("exit", (_code, signal) => {
+			clearTimeout(guard);
 			const log = existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8").slice(from) : "";
 			const paths = [...log.matchAll(/syncResult: path=(\S+)/g)].map((match) => match[1] ?? "");
 			resolve({ lines, results: lines.filter((line) => line.t === "result"), paths, log, signal, survivors });
@@ -125,7 +165,8 @@ function host(
 	});
 }
 
-type Answer = { stopReason: string; text: string; errorMessage?: string };
+type Usage = { input: number; cacheRead: number; cacheWrite: number; cacheWrite1h?: number };
+type Answer = { stopReason: string; text: string; errorMessage?: string; usage?: Usage };
 const answer = (result: Line | undefined) => result?.answer as Answer | undefined;
 const text = (result: Line | undefined) => answer(result)?.text ?? "";
 const done = (result: Line | undefined) => result?.status === "done";
@@ -137,6 +178,19 @@ const turn = (conv: string, requestId: string, text: string): Extract<Step, { op
 	text,
 });
 const noTools = (question: string) => `Without using any tools: ${question}`;
+/** The share of an answer's input tokens read from the prompt cache. */
+const cached = (result: Line | undefined): number => {
+	const usage = answer(result)?.usage;
+	if (usage === undefined) return 0;
+	const total = usage.input + usage.cacheRead + usage.cacheWrite;
+	return total === 0 ? 0 : usage.cacheRead / total;
+};
+const usageOf = (result: Line | undefined): string => {
+	const usage = answer(result)?.usage;
+	if (usage === undefined) return "no usage";
+	const share = `${Math.round(cached(result) * 100)}% cached`;
+	return `${share}: input ${usage.input}, cache read ${usage.cacheRead}, cache write ${usage.cacheWrite} (1h: ${usage.cacheWrite1h ?? "?"})`;
+};
 
 // 1. A turn with several tool calls.
 {
@@ -200,12 +254,14 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	const result = resumed.results[0];
 	check(group, "turn finished after restart, unprompted", done(result), String(result?.reason ?? ""));
 	check(group, "AGENTS.md still reached Claude Code", marked(result));
-	check(
-		group,
-		"Claude Code got Durable's history after the restart",
-		resumed.paths.length > 0 && !resumed.paths.includes("clean-start"),
-		resumed.paths.join(","),
-	);
+	if (bridge) {
+		check(
+			group,
+			"Claude Code got Durable's history after the restart",
+			resumed.paths.length > 0 && !resumed.paths.includes("clean-start"),
+			resumed.paths.join(","),
+		);
+	}
 	const interrupted = resumed.lines.find((line) => line.t === "tool_end" && line.isError === true);
 	check(
 		group,
@@ -239,21 +295,27 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 		aborted?.status === "unanswered" && aborted.reason === "aborted",
 		`${aborted?.status} ${aborted?.reason}`,
 	);
-	check(group, "the bridge closed its Claude Code query", /for-await loop exited, wasAborted=true/.test(run.log));
+	if (bridge) {
+		check(group, "the bridge closed its Claude Code query", /for-await loop exited, wasAborted=true/.test(run.log));
+	}
+	const claudes = ((processes?.descendants as string[] | undefined) ?? []).filter((line) => line.includes("claude"));
+	check(group, "no Claude Code process left running after the abort", claudes.length === 0, claudes.join("; "));
 	const left = (processes?.processes as string[] | undefined) ?? ["(no result)"];
 	check(group, "nothing left running in the workspace while the daemon lives on", left.length === 0, left.join("; "));
 	check(group, "next turn answered", done(after), String(after?.reason ?? ""));
-	check(
-		group,
-		"next turn was a fresh query, not one re-entering a parked query",
-		!run.log.includes("isReentrant=true"),
-	);
-	check(
-		group,
-		"the next turn didn't resume the aborted query's session as is",
-		run.paths.at(-1) !== "reuse" && run.paths.at(-1) !== "clean-start",
-		run.paths.join(","),
-	);
+	if (bridge) {
+		check(
+			group,
+			"next turn was a fresh query, not one re-entering a parked query",
+			!run.log.includes("isReentrant=true"),
+		);
+		check(
+			group,
+			"the next turn didn't resume the aborted query's session as is",
+			run.paths.at(-1) !== "reuse" && run.paths.at(-1) !== "clean-start",
+			run.paths.join(","),
+		);
+	}
 	check(group, "AGENTS.md still reached Claude Code", marked(after));
 	note(`answer: ${JSON.stringify(text(after))}`);
 }
@@ -270,12 +332,10 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	]);
 	const [warm1, warm2, compacted, after] = run.results;
 	check(group, "turns before compaction answered", done(warm1) && done(warm2));
-	check(
-		group,
-		"bridge resumed its Claude Code session between turns (prompt cache kept)",
-		run.paths[1] === "reuse",
-		run.paths.join(","),
-	);
+	check(group, "the second turn read most of its input from the cache", cached(warm2) >= 0.5, usageOf(warm2));
+	if (bridge) {
+		check(group, "bridge resumed its Claude Code session between turns", run.paths[1] === "reuse", run.paths.join(","));
+	}
 	const outcome = compacted?.outcome as { status: string; result?: { submissionId?: unknown } } | undefined;
 	check(
 		group,
@@ -283,14 +343,16 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 		outcome?.status === "completed" && outcome.result?.submissionId !== undefined,
 		JSON.stringify(outcome),
 	);
-	check(group, "summary went through the bridge's isolated path", run.log.includes("routed to isolated summary"));
-	check(group, "shim marked the rewrite", run.log.includes("session_compact:rewrite"));
-	check(
-		group,
-		"bridge didn't resume stale history after the compaction",
-		run.paths[2] !== undefined && run.paths[2] !== "reuse" && run.paths[2] !== "clean-start",
-		run.paths.join(","),
-	);
+	if (bridge) {
+		check(group, "summary went through the bridge's isolated path", run.log.includes("routed to isolated summary"));
+		check(group, "shim marked the rewrite", run.log.includes("session_compact:rewrite"));
+		check(
+			group,
+			"bridge didn't resume stale history after the compaction",
+			run.paths[2] !== undefined && run.paths[2] !== "reuse" && run.paths[2] !== "clean-start",
+			run.paths.join(","),
+		);
+	}
 	check(group, "turn after compaction answered", done(after));
 	check(
 		group,
@@ -333,17 +395,44 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 		);
 		check(group, `${name}: AGENTS.md reached Claude Code`, marked(result));
 	}
-	check(
-		group,
-		"each branch's second turn resumed its own Claude Code session",
-		run.paths[2] === "reuse" && run.paths[3] === "reuse",
-		run.paths.join(","),
-	);
+	for (const [name, result] of [
+		["root", root2],
+		["fork", fork2],
+	] as const) {
+		check(group, `${name}'s second turn read most of its input from the cache`, cached(result) >= 0.5, usageOf(result));
+	}
+	if (bridge) {
+		check(
+			group,
+			"each branch's second turn resumed its own Claude Code session",
+			run.paths[2] === "reuse" && run.paths[3] === "reuse",
+			run.paths.join(","),
+		);
+	}
 }
 
-// 6. Control: the same compaction without the shim's rewrite mark. Not a check of the
+// 6. The prompt cache across an idle conversation: two turns back to back, then a pause
+//    longer than the cache's 5-minute lifetime and shorter than its 1-hour one. Measured,
+//    not checked: it says which lifetime the provider's writes get.
+if (IDLE_MINUTES > 0) {
+	const group = "cache";
+	const run = await host(group, [
+		turn("root", "cache-1", noTools("in one sentence, what is in notes.txt?")),
+		turn("root", "cache-2", noTools("and how many lines does it have?")),
+		{ op: "idle", conv: "root", ms: IDLE_MINUTES * 60_000 },
+		turn("root", "cache-3", noTools("and what is its first line?")),
+	]);
+	const [first, second, , third] = run.results;
+	check(group, "turns answered", done(first) && done(second) && done(third));
+	note(`first turn in a new process: ${usageOf(first)}`);
+	note(`straight after: ${usageOf(second)}`);
+	note(`after ${IDLE_MINUTES} minutes idle: ${usageOf(third)}`);
+	if (bridge) note(`sync paths: ${run.paths.join(",")}`);
+}
+
+// 7. Control: the same compaction without the shim's rewrite mark. Not a check of the
 //    shim; it shows what the mark prevents.
-{
+if (bridge) {
 	const group = "control";
 	const run = await host(
 		group,
@@ -361,7 +450,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	note(`answer: ${JSON.stringify(text(run.results[2]))}`);
 }
 
-// 7. Across every run.
+// 8. Across every run.
 {
 	const group = "all";
 	const everything = `${transcript.join("\n")}\n${existsSync(bridgeLog) ? readFileSync(bridgeLog, "utf8") : ""}`;
@@ -373,6 +462,7 @@ const noTools = (question: string) => `Without using any tools: ${question}`;
 	check(group, "no Harness reports", reports.length === 0, reports.join("\n"));
 	const left = processesIn(workspace);
 	check(group, "nothing left running in the workspace", left.length === 0, left.join("; "));
+	check(group, "every host exited by itself", hung.length === 0, hung.join(", "));
 }
 
 writeFileSync(join(stateDir, "transcript.jsonl"), `${transcript.join("\n")}\n`);
@@ -380,6 +470,32 @@ writeFileSync(join(stateDir, "checks.json"), JSON.stringify(checks, null, "\t"))
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed. State: ${stateDir}`);
 process.exitCode = failed.length === 0 ? 0 : 1;
+
+/** Live descendants of process `root`, as `pid command line`. */
+function descendantsOf(root: number): string[] {
+	const parents = new Map<number, number>();
+	const commands = new Map<number, string>();
+	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+		try {
+			// The parent is the 2nd field after the parenthesized command, which may hold spaces.
+			const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+			parents.set(Number(name), Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]));
+			commands.set(Number(name), readFileSync(`/proc/${name}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120));
+		} catch {
+			// Gone, or not ours to read.
+		}
+	}
+	const found: string[] = [];
+	for (const [pid, command] of commands) {
+		for (let up = parents.get(pid); up !== undefined && up > 1; up = parents.get(up)) {
+			if (up === root) {
+				found.push(`${pid} ${command}`);
+				break;
+			}
+		}
+	}
+	return found;
+}
 
 /** Live processes whose working directory is under `dir`: what a crash leaves running. */
 function processesIn(dir: string): string[] {

@@ -25,17 +25,18 @@ New since the decisions below; Will's to answer, alongside `todos/wire-format.md
 1. **pier, or Earendil's Pi Roam?** Earendil is designing exactly this project in
    the pi repo (see "Earendil's own direction" below): p2, a working but
    explicitly throwaway prototype, and p3 ("Pi Roam"), its successor, still a design
-   discussion. Options: carry on with pier as planned (recommended: p3 has no code
-   and no timeline, and can't load pi-claude-bridge); keep pier deliberately small
-   until p3 shows its shape, aiming to move onto it; or pause. The PoC's value holds
-   either way: daily use, and knowing the bridge on Durable.
+   discussion. Options: carry on with pier as planned; keep pier deliberately small
+   (a local, time-boxed slice, built so its parts carry over) until p3 shows its
+   shape, aiming to move onto it; or pause. Will asked on 2026-11-13 whether to wait
+   a month, and how to build so tools and UIs migrate upstream; Claude's answer: wait,
+   or build only the thin local slice. Not decided.
 2. **pi-claude-bridge, or Earendil's pi-claude-code?** Will called the bridge
    indispensable (2026-10-28). Earendil now has its own Claude Code provider,
    `@earendil-works/pi-claude-code` (below), which runs on Durable with no shim at
-   all: a smoke test on 2026-11-12 answered a tool turn and a follow-up through it.
-   The bridge is the proven, fuller option and stays the default; pi-claude-code
-   would remove `src/bridge/` entirely. Worth a gate run of its own if Will wants to
-   weigh it.
+   all. Will, 2026-11-13: *"seems like there's no downside to using Earendil's own
+   pi-claude-code? And it would give us future compatibility."* It passed the same
+   gate (39/39, 2026-11-13; below), with the prompt cache as good as the bridge's.
+   Switching pier to it, and deleting `src/bridge/`, waits on Will's go-ahead.
 
 ## Why
 
@@ -274,6 +275,24 @@ Found 2026-11-12 in the pi repo at v1.5.2, `apps/`. Neither is published.
 - p3's notes on efficiency are worth reading before building the daemon: p2's
   workers used 170–290 MiB each, and a page switch fetched 1.5 MiB until objects
   were held once per page and lists paged (`apps/p3/docs/efficiency.md`).
+- **Timeline, from `main` on 2026-11-13** (`apps/p3/docs/status-2026-11-09.md` §9 and
+  `plan-2026-11-11.md`): the owner's direction is "we are still in idea space; start
+  building things out to find what does not work". The web and TUI primitives
+  weren't discussed yet, and reusing Chord's app kit is in question ("too big,
+  missing things p3 needs"). The plan: p3's skeleton (server, supervisor, a page and a
+  terminal plugin that reload in place) in place the week of 2026-11-16, decisions
+  from p2 and issues at an onsite that week, then one small step each: a session
+  list, a worker per session, the harness with a fake model and a minimal chat, real
+  models. Meanwhile p2 changes daily (views, artifacts, plugins the agent writes).
+- **Radius** is Earendil's hosted service for pi: a paid model gateway (credits,
+  inference through OpenRouter, organization budgets and analytics), web search,
+  shared artifacts, and an MCP server; closed source, on Cloudflare
+  (radius.earendil.com/docs, 2026-11-13). In p2 and p3 it's also the relay for
+  remote access to an instance, the planned home of whole-instance backups (in Chord's
+  store sync format), one of the pluggable sign-ins, and a one-click cloud machine.
+  p2's Radius plugin is optional (`P2_RADIUS=0`), and p3 lists Radius beside share
+  links and SAML as sign-ins, but Pi Roam's remote access and backups are Radius
+  features. pier's equivalents are the tailnet, and backing up a SQLite file.
 
 ### Earendil's Claude Code provider: pi-claude-code
 
@@ -288,10 +307,52 @@ Usage fails unless `PI_CLAUDE_CODE_ALLOW_USAGE_CREDITS` is set.
 Smoke test, 2026-11-12: `models.registerNativeProvider(createClaudeCodeProvider())` on
 a Durable 1.5.2 Harness with `CodingTools` and pier's prompt, model
 `claude-code/claude-opus-5-5`. Auth came from Claude Code's Max login. A turn with bash
-and read answered, with the AGENTS.md marker; a follow-up answered from the history
-(cache read 2,004 of 2,883 input tokens). Not tested: crash, Esc, compaction, fork.
+and read answered, with the AGENTS.md marker; a follow-up answered from the history.
 The bridge's own notes (`diag/EXTRA-USAGE-400.md`) report this route passing
 Anthropic's subscription check with pi's prompt verbatim.
+
+**The gate, 2026-11-13: 39/39** (`PIER_GATE_PROVIDER=claude-code npm run gate`;
+pi-claude-code at d5b5e04, Claude Code 2.1.318, Opus 5.5, thinking `low`). The same
+steps as the bridge's: tools, `kill -9` mid-tool (the call came back interrupted),
+Esc mid-tool (no Claude Code process left), compaction, a fork with both branches
+alternating, and AGENTS.md on every turn. The bridge-only checks don't apply: no
+shim, no session sync. Nothing was billed to Extra Usage.
+
+**The prompt cache.** The gate now measures it, with a 6-minute idle between two
+turns; both providers ran it on 2026-11-13 (the bridge's run passed 47/47). Anthropic's
+cache entries last 5 minutes or 1 hour.
+
+| | Second turn in a row | After 6 minutes idle |
+|---|---|---|
+| pi-claude-code | 96–98% of input read from cache | 97% |
+| pi-claude-bridge 0.12.0 | 99% | 99% |
+
+pi-claude-code writes every cache entry with a 1-hour lifetime (`ttl: "1h"`, and
+`cacheWrite1h` equals `cacheWrite`). The bridge reports no lifetime, but its hit after
+6 minutes means Claude Code writes 1-hour entries too. So a conversation left for up
+to an hour costs one cheap cache read on return with either provider, and one left
+longer re-writes its whole context once, with either. Classic pi's `cacheWarming`
+keeps a cache warm up to 30 minutes between runs; Durable has nothing like it, so a
+daemon wanting it would add it. (The 2026-11-12 smoke test's 70% was a tiny
+conversation, where the new turn was a large share of the input.) Not tested: an idle
+longer than an hour.
+
+Three things a daemon on it must handle:
+
+- **Release each conversation's warm Claude Code process.** pi-claude-code keeps up
+  to two warm `claude -p` processes, one per session, for linear continuations. It
+  frees them through pi-ai's `registerSessionResourceCleanup`, which classic pi
+  triggers when a session ends, with `cleanupSessionResources(sessionId)`; Durable
+  never does. In the first gate run, one outlived its documented 5-minute limit by
+  40 minutes and kept the host from exiting. The gate now calls
+  `cleanupSessionResources()` before closing; a daemon would call it per conversation
+  once it goes idle.
+- **Claude Code runs in the host's directory** (`process.cwd()`), not the
+  conversation's. pi runs the tools, and pier's prompt names the conversation's
+  directory, so the gate wasn't affected; Claude Code's own environment block names
+  the daemon's directory.
+- **It spawns Claude Code detached**, like Durable's tools, so only a control-group
+  kill reaps it if the daemon dies.
 
 ### The v1.0.0 demo: a coding agent on Durable, with pi's TUI
 

@@ -1,12 +1,14 @@
-// Steps of the bridge gate, in their own process so the driver can kill it, and in one
-// process so the bridge's in-memory session state carries from step to step.
+// Steps of the gate, in their own process so the driver can kill it, and in one
+// process so the provider's in-memory session state carries from step to step.
 //   node experiments/bridge-gate/host.ts <state-dir> '<steps as a JSON array>'
 // Prints JSON lines: each conversation's agent events, and a `result` per step.
+// PIER_GATE_PROVIDER picks the Claude Code provider: `bridge` (pi-claude-bridge through
+// the shim; the default) or `claude-code` (Earendil's pi-claude-code, with no shim).
 // PIER_GATE_NO_REWRITE_MARK=1 turns off the shim's history-rewrite mark, as a control.
 import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { type AssistantMessage, cleanupSessionResources } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
 	AssistantEntry,
@@ -24,14 +26,17 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { loadBridge } from "../../src/bridge/load.ts";
-import { createBridgeShim } from "../../src/bridge/shim.ts";
+import { type BridgeShim, createBridgeShim } from "../../src/bridge/shim.ts";
 import { createPrompt } from "../../src/prompt.ts";
+import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../../src/providers/claude-code.ts";
 
 export type Step =
 	/** `abortOnTool`: abort the conversation, as Esc does, once a tool call's arguments contain this. */
 	| { op: "turn"; conv: string; text: string; requestId: string; abortOnTool?: string }
-	/** Processes still running in the workspace after `waitMs`. */
+	/** Processes still running in the workspace, and the host's descendants, after `waitMs`. */
 	| { op: "processes"; conv: string; waitMs: number }
+	/** Do nothing for `ms`, as a user who leaves a conversation idle. */
+	| { op: "idle"; conv: string; ms: number }
 	| { op: "resume"; conv: string; submission: SubmissionId }
 	| { op: "compact"; conv: string; instructions?: string }
 	| { op: "fork"; conv: string; as: string }
@@ -48,22 +53,32 @@ const conversations: Record<string, ConversationId> = existsSync(statePath)
 const context = BACKGROUND_CONTEXT;
 const out = (line: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(line)}\n`);
 
+const provider = process.env.PIER_GATE_PROVIDER === "claude-code" ? "claude-code" : "bridge";
+const model =
+	provider === "claude-code"
+		? { provider: CLAUDE_CODE_PROVIDER, modelId: "claude-opus-5-5" }
+		: { provider: "claude-bridge", modelId: "claude-opus-5-5" };
 const models = await ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
 const prompt = createPrompt();
-const bridge = await loadBridge();
-const shim = createBridgeShim(bridge, {
-	models,
-	promptOptions: ({ cwd }) => prompt.options(cwd),
-	notify: (message, type) => out({ t: "notify", type, message }),
-	log: (message) => out({ t: "shim", message }),
-	markRewrites: process.env.PIER_GATE_NO_REWRITE_MARK !== "1",
-});
-out({ t: "bridge", root: bridge.root, events: shim.events, droppedTools: shim.droppedTools });
-
 const registry = createRegistry();
 registry.install(CodingTools);
 registry.install(prompt.extension);
-registry.install(shim.extension);
+let shim: BridgeShim | undefined;
+if (provider === "claude-code") {
+	models.registerNativeProvider(await loadClaudeCodeProvider());
+	out({ t: "provider", provider, models: models.getModels(CLAUDE_CODE_PROVIDER).map((entry) => entry.id) });
+} else {
+	const bridge = await loadBridge();
+	shim = createBridgeShim(bridge, {
+		models,
+		promptOptions: ({ cwd }) => prompt.options(cwd),
+		notify: (message, type) => out({ t: "notify", type, message }),
+		log: (message) => out({ t: "shim", message }),
+		markRewrites: process.env.PIER_GATE_NO_REWRITE_MARK !== "1",
+	});
+	registry.install(shim.extension);
+	out({ t: "provider", provider, root: bridge.root, events: shim.events, droppedTools: shim.droppedTools });
+}
 
 const harness = await Harness.open(
 	await openNodeSqliteStorage(join(stateDir, "pier.sqlite")),
@@ -81,7 +96,7 @@ const harness = await Harness.open(
 	context,
 );
 // PIER_GATE_NO_RUN_END=1 leaves the shim unattached, so runs ending go unseen, as a control.
-if (process.env.PIER_GATE_NO_RUN_END !== "1") shim.attach(harness);
+if (process.env.PIER_GATE_NO_RUN_END !== "1") shim?.attach(harness);
 
 let abortTrigger: { conversation: Conversation; match: string } | undefined;
 
@@ -89,7 +104,7 @@ const open = async (key: string): Promise<Conversation> => {
 	const id = conversations[key];
 	if (key === "root" && id === undefined) {
 		const root = await harness.root(context, {
-			agent: { model: { provider: "claude-bridge", modelId: "claude-opus-5-5" }, thinkingLevel: "low", cwd: workspace },
+			agent: { model, thinkingLevel: "low", cwd: workspace },
 		});
 		conversations.root = root.id;
 		return root;
@@ -188,7 +203,11 @@ for (const step of steps) {
 	writeFileSync(statePath, JSON.stringify(conversations, null, "\t"));
 }
 for (const stream of watched.values()) await stream.stop();
-await shim.shutdown();
+await shim?.shutdown();
+// Releases per-session provider state, such as the warm Claude Code process pi-claude-code
+// keeps for each conversation. pi does this when a session ends; Durable never does, and
+// without it that process outlives its 5-minute limit and keeps this one running.
+cleanupSessionResources();
 await harness.close(context);
 
 async function run(step: Step, conversation: Conversation): Promise<Record<string, unknown>> {
@@ -224,7 +243,11 @@ async function run(step: Step, conversation: Conversation): Promise<Record<strin
 			return { inspect: await harness.inspect(context) };
 		case "processes": {
 			await new Promise((resolve) => setTimeout(resolve, step.waitMs));
-			return { processes: processesIn(workspace) };
+			return { processes: processesIn(workspace), descendants: descendantsOf(process.pid) };
+		}
+		case "idle": {
+			await new Promise((resolve) => setTimeout(resolve, step.ms));
+			return { idled: step.ms };
 		}
 	}
 }
@@ -235,6 +258,33 @@ async function untilRunning(match: string): Promise<void> {
 		if (processesIn(workspace).some((line) => line.includes(match))) return;
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
+}
+
+/** Live descendants of process `root`, as `pid command line`. Claude Code runs in the host's directory, not the workspace. */
+function descendantsOf(root: number): string[] {
+	const parents = new Map<number, number>();
+	const commands = new Map<number, string>();
+	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+		try {
+			// The parent is the 2nd field after the parenthesized command, which may hold spaces.
+			const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+			const parent = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+			parents.set(Number(name), parent);
+			commands.set(Number(name), readFileSync(`/proc/${name}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120));
+		} catch {
+			// Gone, or not ours to read.
+		}
+	}
+	const found: string[] = [];
+	for (const [pid, command] of commands) {
+		for (let up = parents.get(pid); up !== undefined && up > 1; up = parents.get(up)) {
+			if (up === root) {
+				found.push(`${pid} ${command}`);
+				break;
+			}
+		}
+	}
+	return found;
 }
 
 /** Live processes whose working directory is under `dir`. */
@@ -262,5 +312,12 @@ function summarize(message: AssistantMessage) {
 		errorMessage: message.errorMessage,
 		text: textOf(message.content.filter((part) => part.type === "text")),
 		toolCalls: message.content.filter((part) => part.type === "toolCall").map((part) => part.name),
+		usage: {
+			input: message.usage.input,
+			cacheRead: message.usage.cacheRead,
+			cacheWrite: message.usage.cacheWrite,
+			// Of cacheWrite, what was written with a 1-hour lifetime rather than 5 minutes.
+			cacheWrite1h: (message.usage as { cacheWrite1h?: number }).cacheWrite1h,
+		},
 	};
 }
