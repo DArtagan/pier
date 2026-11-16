@@ -23,6 +23,17 @@ loopback, tailnet, a tunnel), with Earendil's p2 as prior art. The local part wa
 settled for the thin slice on 2026-11-13; it stays as the reference for a web or
 phone client.
 
+**[tui.md](tui.md) — the terminal client, for daily use**
+What's there, and candidates for making it good for daily use: diffs, pi's own
+components, a footer, `/model`, `!command`, `@file`, keybindings, reconnecting. Each
+has its facts checked or marked unchecked. Waiting on Will to rank them.
+
+**[web.md](web.md) — a web UI: findings, and a decision for Will**
+Elanor's licensing and releases (public and licensed; the preview registry needs a
+staff login), what p3 and p2 have, what a pier web UI would take (a TCP listener,
+sign-in, a build step, the phone over the tailnet), and the principle it would need an
+exception to. Five questions, waiting on Will; not deferred to December.
+
 ## Writing a spec
 
 Every spec's work happens within `docs/principles.md`; a spec that needs to step
