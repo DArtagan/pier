@@ -26,7 +26,8 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
-import { createPrompt } from "./prompt.ts";
+import { ConversationDirectories } from "../layer/claude-code.ts";
+import { createPrompt } from "../layer/prompt.ts";
 import {
 	type AttachTarget,
 	type ConversationSummary,
@@ -37,7 +38,6 @@ import {
 	type Request,
 	type Response,
 } from "./protocol.ts";
-import { ConversationDirectories } from "./providers/claude-code.ts";
 
 /**
  * The environment of the client that last attached to a conversation. Its tools run with

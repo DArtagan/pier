@@ -22,9 +22,9 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AttachedConversation, PierClient } from "../src/client.ts";
-import { type Daemon, startDaemon } from "../src/daemon.ts";
-import { createPrompt } from "../src/prompt.ts";
+import { AttachedConversation, PierClient } from "../src/host/client.ts";
+import { type Daemon, startDaemon } from "../src/host/daemon.ts";
+import { createPrompt } from "../src/layer/prompt.ts";
 
 describe("daemon", () => {
 	let dir: string;

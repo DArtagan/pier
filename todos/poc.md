@@ -48,7 +48,7 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
 
 ### What's built
 
-- **`pier daemon`** (`src/daemon.ts`, `src/cli.ts`): one Harness on one SQLite file
+- **`pier daemon`** (`src/host/daemon.ts`, `src/host/cli.ts`): one Harness on one SQLite file
   (`$XDG_STATE_HOME/pier/pier.sqlite`, directory 0700), pi-claude-code as the provider,
   Durable's coding tools run sequentially, pier's prompt. It listens on
   `$XDG_RUNTIME_DIR/pier/pier.sock` (0600, in a 0700 directory), and refuses to start
@@ -56,16 +56,16 @@ anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
   (`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override.
   Claude Code runs in each conversation's directory, which it reports to the model:
   pi-claude-code starts it in `process.cwd()`, so pier answers that with the
-  conversation's directory inside each request (`src/providers/claude-code.ts`). First
+  conversation's directory inside each request (`src/layer/claude-code.ts`). First
   the daemon ran Claude Code in pier's own git worktree, and Claude puzzled over it;
   then in the state directory, and Claude noticed that didn't match (Will, 2026-11-13).
   The daemon still runs in its state directory, for anything outside a request.
-- **The protocol** (`src/protocol.ts`): JSON in WebSocket messages over the Unix
+- **The protocol** (`src/host/protocol.ts`): JSON in WebSocket messages over the Unix
   socket. Requests with ids and one response each: `hello` (versions must match),
   `attach`, `detach`, `submit`, `abort`, `compact`, `configure`, `list`, `entries`. An
   attached connection gets Durable's conversation view, then each change's
   operations, which the client applies with Chord's `applyImmutable`.
-- **The client** (`src/client.ts`, `src/tui.ts`): `pier` continues the newest
+- **The client** (`src/host/client.ts`, `src/host/tui.ts`): `pier` continues the newest
   conversation in the current directory (by latest entry), or starts one; `pier new`,
   `pier resume <n>`, `pier list [--all]`. On pi-tui, with pi's Markdown and list
   themes: the transcript (user messages, Markdown answers, tool calls with the last
@@ -286,7 +286,7 @@ What it took, and what was wrong in the original plan:
   with the conversation's session id, which the bridge's cwd lookup falls back to. A
   Durable fork is a new conversation with a fresh session id.
 - **The capture key matches by construction.** The shim keys the prompt with the
-  bridge's own `toBridgeContext` over the same messages. The prompt (`src/prompt.ts`)
+  bridge's own `toBridgeContext` over the same messages. The prompt (now `src/layer/prompt.ts`)
   leaves out pi's preamble entirely; Claude Code uses its own preset. Bridge 0.12
   dropped its guard against pi's preamble ("pi 1.5's prompt no longer trips
   Anthropic's third-party billing check"), but still forwards only the prompt's
@@ -668,7 +668,7 @@ isolating failures.
 4. **Vanilla parity.** Parked by the thin slice: build only what daily use asks for,
    and wait for p3 for the rest. The list, for reference:
    - the prompt: pi's system prompt sections, AGENTS.md, and skills (ketch's
-     included), from `DefaultResourceLoader` and `loadSkills`. `src/prompt.ts` has a
+     included), from `DefaultResourceLoader` and `loadSkills`. `src/layer/prompt.ts` has a
      one-line preamble, AGENTS.md, skills and the directory; pi-claude-code sends it
      as it is, so pi's own sections would now reach Claude.
    - `/new`, `/resume` picker, `--continue`

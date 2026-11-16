@@ -5,8 +5,8 @@ built under and the ones it learned along the way, mostly between 2026-10-28 and
 2026-11-13. A change that would break one needs Will's decision first, recorded here
 when he makes it.
 
-Facts about Durable and pi-claude-code that these rest on are in `CLAUDE.md`; the
-history behind them is in `todos/poc.md`.
+Why pier exists is in `docs/vision.md`. Facts about Durable and pi-claude-code that
+these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
 
 ## 1. pier is a thin bridge, not a product
 
@@ -30,7 +30,8 @@ history behind them is in `todos/poc.md`.
 
 - **Agent behaviour goes in Durable extensions** (prompt sections, tools, hooks), and
   pier's state in **Durable documents**, never in daemon code. p3 plans to take
-  plugins' Durable extensions as they are.
+  plugins' Durable extensions as they are. They live in `src/layer/`, which never
+  imports `src/host/` (`test/layer.test.ts` checks).
 - **Providers are plain pi-ai providers.** Nothing leans on pi's old extension API,
   which p3 calls "a catalogue of what users wanted, not a model".
 - **Clients render Durable's own view:** state, not events. The protocol is an
@@ -44,7 +45,7 @@ history behind them is in `todos/poc.md`.
   it, and then:
   - keep the workaround in one place;
   - say in its comment that it's a workaround, and what upstream change would replace
-    it (as `src/providers/claude-code.ts` does for Claude Code's directory);
+    it (as `src/layer/claude-code.ts` does for Claude Code's directory);
   - offer to raise the gap upstream. Raising it is outward-facing, so ask Will first.
 - **No patched or forked dependencies** where a contained workaround will do. A
   patched npm package complicates packaging, and a fork is one more thing to keep up.

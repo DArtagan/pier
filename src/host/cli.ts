@@ -11,10 +11,10 @@ import { join } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../layer/claude-code.ts";
 import { PierClient } from "./client.ts";
 import { startDaemon } from "./daemon.ts";
 import { socketPath, stateDir } from "./paths.ts";
-import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "./providers/claude-code.ts";
 import { runTui } from "./tui.ts";
 
 const USAGE = `usage: pier [new | resume <number> | list [--all] | daemon]`;

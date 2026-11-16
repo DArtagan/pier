@@ -10,13 +10,13 @@ import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/provid
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { createRegistry, Harness, MemoryStorage } from "@earendil-works/pi-durable";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createPrompt } from "../src/prompt.ts";
 import {
 	CLAUDE_CODE_PROVIDER,
 	ConversationDirectories,
 	inConversationDirectories,
 	loadClaudeCodeProvider,
-} from "../src/providers/claude-code.ts";
+} from "../src/layer/claude-code.ts";
+import { createPrompt } from "../src/layer/prompt.ts";
 
 const context = BACKGROUND_CONTEXT;
 

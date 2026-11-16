@@ -19,7 +19,7 @@ pier resume <n>       # attach to conversation #<n>
 pier list [--all]     # conversations here (or everywhere)
 ```
 
-Until it's packaged, `npm run pier -- <args>`, or `node src/cli.ts`. In the client,
+Until it's packaged, `npm run pier -- <args>`, or `node src/host/cli.ts`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
 the run carries on. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
@@ -33,19 +33,23 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 
 ## Layout
 
-- `src/daemon.ts` runs the Harness and serves it on the socket; `src/protocol.ts` is what
-  goes over it; `src/client.ts` and `src/tui.ts` are the client; `src/cli.ts` is `pier`.
-- `src/providers/claude-code.ts` loads Earendil's
-  [pi-claude-code](https://github.com/earendil-works/pi-claude-code), the provider that
-  sends requests through Claude Code (below).
-- `src/prompt.ts` builds the system prompt from AGENTS.md files and skills, found the way
-  pi finds them.
+- `src/layer/` is what carries over to p3 (`docs/vision.md`), and never imports the
+  host:
+  - `claude-code.ts` loads Earendil's
+    [pi-claude-code](https://github.com/earendil-works/pi-claude-code), the provider that
+    sends requests through Claude Code (below);
+  - `prompt.ts` builds the system prompt from AGENTS.md files and skills, found the way
+    pi finds them.
+- `src/host/` is what's thrown away when p3 takes over: `daemon.ts` runs the Harness and
+  serves it on the socket, `protocol.ts` is what goes over it, `client.ts` and `tui.ts`
+  are the client, and `cli.ts` is `pier`.
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
 - `todos/` holds specs for work not yet done.
+- `docs/vision.md` says what pier is for, and how it changes as p3 does.
 - `docs/principles.md` holds the principles all work on pier keeps to.
 - `docs/releasing.md` says how release-please makes versions.
 
@@ -80,7 +84,7 @@ Things a host must know, all found by the gate:
   its working directory: pi-claude-code starts it in `process.cwd()`, and nothing in a
   request names a directory. pier's `ConversationDirectories` extension records each
   conversation's directory before its requests, and the provider pier loads runs each
-  request in a scope where `process.cwd()` answers it (`src/providers/claude-code.ts`).
+  request in a scope where `process.cwd()` answers it (`src/layer/claude-code.ts`).
   A provider option upstream would replace that.
 - **It spawns Claude Code detached**, as Durable spawns tools, so only a control-group
   kill reaps them if the host dies.

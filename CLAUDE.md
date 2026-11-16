@@ -9,9 +9,11 @@ every session, and clients attach to it. TypeScript on Node 24, run directly wit
 Node's type stripping (no build step). Claude is reached through Claude Code, with
 Earendil's pi-claude-code provider. See `README.md` for the layout.
 
-**Read `docs/principles.md` first.** All work on pier happens within it: keep pier
-thin, build so it carries over to Earendil's p3, stay upstream-first and current, keep
-it local and minimal, back claims with evidence, and leave direction to Will.
+**Read `docs/vision.md` and `docs/principles.md` first.** The vision says what pier is
+for; all work happens within the principles: keep pier thin, build so it carries over
+to Earendil's p3, stay upstream-first and current, keep it local and minimal, back
+claims with evidence, and leave direction to Will. Code that carries over goes in
+`src/layer/`, which must never import `src/host/` (`test/layer.test.ts`).
 
 ## Commands
 
@@ -61,7 +63,7 @@ it local and minimal, back claims with evidence, and leave direction to Will.
 ## Working with pi-claude-code
 
 - It ships TypeScript under `node_modules`, which Node refuses to strip, so it's loaded
-  with jiti (`src/providers/claude-code.ts`), as pi does. It isn't on npm: it's pinned to
+  with jiti (`src/layer/claude-code.ts`), as pi does. It isn't on npm: it's pinned to
   a commit as a GitHub tarball. To bump it, read its commits and `ARCHITECTURE.md`,
   change the commit in `package.json`, `npm install`, then run the tests and the gate.
 - It runs `claude` from the PATH, or `PI_CLAUDE_CODE_COMMAND`, on Claude Code's own login

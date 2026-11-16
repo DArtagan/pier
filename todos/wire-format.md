@@ -47,7 +47,7 @@ taken as the recommendations, without Will answering them one by one:
 3. JSON in WebSocket messages.
 4. The Unix socket only, with SSH for other hosts.
 
-Question 5 (an ACP adapter) wasn't taken up. Built as `src/protocol.ts`; see
+Question 5 (an ACP adapter) wasn't taken up. Built as `src/host/protocol.ts`; see
 `todos/poc.md`, "The thin slice".
 
 Already decided before: one SQLite storage for all
