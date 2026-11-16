@@ -35,7 +35,10 @@ claims with evidence, and leave direction to Will. Code that carries over goes i
   `DArtagan/pier`; merge through a pull request, where CI runs `devenv test`.
 - **Commits are [Conventional Commits](https://www.conventionalcommits.org/)**, checked
   by the `convco` hook: release-please makes versions and `CHANGELOG.md` from them. Only
-  `feat`, `fix`, `perf` and `revert` cut a release. See `docs/releasing.md`.
+  `feat`, `fix`, `perf` and `revert` cut a release. A pull request with a conventional
+  title is squashed, and lists several changelog notes in a commit-override block at the
+  end of its body; never name that block's marker anywhere else in the body. See
+  `docs/releasing.md`, "Merging a pull request".
 
 ## Working with Pi Durable
 

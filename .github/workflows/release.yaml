@@ -15,3 +15,23 @@ jobs:
       pull-requests: write
     steps:
       - uses: googleapis/release-please-action@v5
+
+  # A check on the open release pull request, failing when release-please
+  # couldn't parse a commit, which it otherwise reports only in its log. A
+  # job of its own because a step can't see an earlier step's output.
+  commits-parsed:
+    needs: release-please
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+      - run: .github/scripts/commits-parsed.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
