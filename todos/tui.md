@@ -99,25 +99,31 @@ In the order Will chose (below).
   this desktop runs `wl-copy`; read back with `wl-paste`. Not tried with a real mouse,
   which tmux (`mouse on`) passes on the same way.
 
-  **Links: proposed to need nothing from pier.** Will opens links in pi with
-  Shift+click. That is, by his config rather than by watching it, Alacritty's own URL
-  hint: Alacritty 0.17's default, as his `alacritty.toml` sets no `hints`, and Shift
-  bypasses an app's mouse capture. It matches the URL in the visible text. pi-tui prints
-  a link's URL as text whenever it doesn't emit OSC 8 hyperlinks, which it doesn't under
-  his tmux (`client_termfeatures` lacks `hyperlinks`), so pier shows `the docs
-  (https://…)` as pi does (seen 2026-11-16). Clicking without Shift would need OSC 8
-  through tmux (`terminal-features ',alacritty*:hyperlinks'`) and an opener of pier's
-  own, since pi's `openBrowser` isn't exported. Will asked (2026-11-16): *"Is it tidier
-  to enable hyperlink support in alacritty, than it is mucking with pi openBrowser?"*
-  Claude's proposal, not yet agreed: rely on Alacritty's hint, and pass no `openUrl`.
-  Unchecked: whether a URL that pi-tui wraps onto a second line still matches the hint.
+  **Links open with Shift+click, through Alacritty; pier passes no `openUrl`.** Will
+  decided (2026-11-16) to make tmux pass hyperlinks on rather than give pier an opener
+  of its own (pi's `openBrowser` isn't exported): *"Yes, let's do both to my ~/dotfiles:
+  1. Enable hyperlink support in alacritty 2. set-clipboard for the tmux config"*.
+  Dotfiles `1035c03` adds `terminal-features ",alacritty*:RGB:hyperlinks"`; Alacritty
+  needed nothing, as it takes OSC 8 already and its default URL hint opens them. pi-tui
+  emits OSC 8 when tmux's `client_termfeatures` lists `hyperlinks`, which it does for
+  clients attached since; it then shows a link's text alone, not `text (url)`.
+  Shift+click opened one in pi (Will, 2026-11-16). Without Shift, a click opens a link
+  in pi's fullscreen, through `openBrowser`, and does nothing in pier's.
 
-  **Copying over SSH doesn't reach the phone or laptop, in pi either.** In a session
-  over SSH, `copyToClipboard` sends OSC 52 for the client's terminal, but Will's tmux
-  has `set-clipboard external`, which ignores OSC 52 from applications: an OSC 52
-  printed in a pane made no tmux buffer and didn't reach the clipboard (checked
-  2026-11-16). `set -g set-clipboard on` in his tmux config (dotfiles) would pass it
-  on; his decision.
+  **Copying over SSH: fixed in dotfiles, with two conditions.** In a session over SSH,
+  `copyToClipboard` sends OSC 52 for the client's terminal. Will's tmux ignored those
+  (`set-clipboard` was tmux's default, `external`); dotfiles `1035c03` sets it `on`.
+  Checked 2026-11-16, with tmux's server log: tmux keeps the copy as a buffer and
+  writes it on to the client, and an OSC 52 printed in a pane reached Wayland's
+  clipboard. The conditions, both seen that day:
+  - tmux forwards only to clients showing the pane's window
+    (`screen_write_set_client_cb`), so a copy from a background window stays a tmux
+    buffer.
+  - Alacritty on Wayland sets the clipboard only while one of its windows has keyboard
+    focus; the same sequence to an unfocused window did nothing.
+  It sets the clipboard, not the primary selection, so it pastes with Ctrl+Shift+V,
+  not middle-click or Shift+Insert. Checked on this machine only: not yet from pi or
+  pier over a real SSH session.
 
   Not done: Will's own `tuiMode`, `fullscreenCopyOnSelect` and
   `fullscreenWheelScrollLines` from `settings.json` aren't read; pier takes the flag
