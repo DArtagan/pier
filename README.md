@@ -17,6 +17,7 @@ pier                  # in a project: continue its newest conversation, or start
 pier new              # start a new one
 pier resume <n>       # attach to conversation #<n>
 pier list [--all]     # conversations here (or everywhere)
+pier --tui-mode regular …  # the client in the terminal's own scrollback, not fullscreen
 ```
 
 In this repo, `npm run pier -- <args>`, or `node src/host/cli.ts`; the package (dotfiles
@@ -24,10 +25,16 @@ builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
 the run carries on. When the daemon restarts, the client reconnects and carries on
-where it left off. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
-one conversation. Each
-conversation's tools run in its directory, with the environment of the last pane that
-attached to it.
+where it left off.
+
+The client runs fullscreen, on the alternate screen, as pi does by default: it scrolls
+and searches (Ctrl+Shift+F) itself, and leaves the transcript in the terminal's
+scrollback when you leave. `--tui-mode regular`, pi's flag, draws it in the terminal's
+own scrollback instead.
+
+Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
+one conversation. Each conversation's tools run in its directory, with the environment
+of the last pane that attached to it.
 
 The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 `$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
@@ -48,6 +55,7 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
+- `experiments/transcript/` measures the terminal client with a long transcript.
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
 - `todos/` holds specs for work not yet done.

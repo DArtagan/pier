@@ -27,8 +27,17 @@ TUI for day-to-day use"*, and *"Yes, start a todos/tui.md"*.
 
 ## What's there now (2026-11-16)
 
-`src/host/tui.ts`, about 350 lines on pi-tui's main-screen renderer, with pi's Markdown
-and list themes:
+`src/host/tui.ts`, about 500 lines on pi-tui's renderers, with pi's Markdown and list
+themes:
+
+- **Two modes, as pi has** (landed 2026-11-16). Fullscreen by default: pi-tui's
+  `TuiAltScreen`, set up and laid out as pi's own `createInteractiveTui` and
+  `createChatViewport` do (neither is exported in 1.5.2, so pier copies about 50 lines).
+  It scrolls, searches, selects and copies (pi's `copyToClipboard`), and on leaving
+  prints the transcript into the scrollback, as pi's default
+  `fullscreenExitOutput: "transcript"` does. `--tui-mode regular`, pi's flag, keeps
+  `TuiMainScreen`. User messages carry pi's OSC 133 prompt markers, which fullscreen's
+  Ctrl+Up and Ctrl+Down jump between.
 
 - **The transcript:** user messages, answers as Markdown, the first line of thinking,
   tool calls with a one-line summary of their arguments, and the last 8 lines of tool
@@ -71,12 +80,73 @@ In the order Will chose (below).
   transcript holds a gap ("… some messages aren't loaded"), and nothing fills it:
   `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
   seen in the runs by hand, whose outages missed fewer entries than the window holds.
-- **Long transcripts.** Every update rebuilds the transcript's component list,
-  reusing cached components for finished entries. Unmeasured past a few hundred
-  entries.
-- **Main screen or alternate screen.** pi-tui has both. The main screen keeps the
-  terminal's scrollback, as now; the alternate screen gives pier its own scrolling and
-  search (`Ctrl+Shift+F`).
+- **Long transcripts: measured, fine fullscreen** (2026-11-16,
+  `node --expose-gc experiments/transcript/bench.ts`). Each update from the daemon
+  refills the transcript (`fillTranscript`, reusing stored entries' components, which
+  `test/tui.test.ts` checks), and each frame lays out the whole transcript, as pi's
+  does. With an answer streaming at 120×50, six entries a turn (two of them 20-line tool
+  results):
+
+  | Entries | Lines | Fill, p50 | Frame fullscreen, p50 / p95 | Frame regular, p50 / p95 | Heap fullscreen |
+  |---|---|---|---|---|---|
+  | 100 | 1,080 | <0.01 ms | 0.14 / 0.17 ms | 0.39 / 0.49 ms | 5 MiB |
+  | 1,000 | 10,800 | 0.02 ms | 0.20 / 0.32 ms | 3.1 / 4.3 ms | 8 MiB |
+  | 3,000 | 32,400 | 0.04 ms | 0.38 / 0.54 ms | 10.9 / 14.9 ms | 19 MiB |
+  | 10,000 | 108,000 | 0.18 ms | 1.2 / 3.6 ms | 41.7 / 45.3 ms | 59 MiB |
+
+  How long they get: Will's classic pi sessions since October (121) have a median of 79
+  messages, a 90th percentile of 410, a 99th of 1,079, and at most 1,687 (counted
+  2026-11-16); a message is about one entry. A pier client holds only what it loaded:
+  the newest 50 on attaching, then what streams in and what `/earlier` brings, 50 at a
+  time, so the first frame of thousands of new entries at once (430 ms at 10,000) doesn't
+  happen in use. Fullscreen needs nothing. Regular mode is pi-tui's `TuiMainScreen`,
+  which diffs every line each frame: about 5 ms a frame at Will's longest session, up to
+  60 frames a second while an answer streams. It's the renderer pi's regular mode uses,
+  so a fix belongs upstream; not raised.
+- **Main screen or alternate screen: both, fullscreen by default** (2026-11-16). By
+  hand in tmux with real Claude, the same day: a 60-line answer scrolled with PageUp,
+  Ctrl+Home and Ctrl+End, with the scrollbar and the "Jump to latest message · Ctrl+End"
+  label; Ctrl+Shift+F found its one match; Ctrl+Up jumped to a prompt, and didn't with
+  the OSC 133 markers taken out; Esc stopped a run; the client reconnected across a
+  daemon restart; leaving left all 60 lines in tmux's scrollback; `--tui-mode regular`
+  ran on the main screen, and `--tui-mode alt` was refused.
+
+  **Mouse selection**, the same day, with SGR mouse events sent into the pane as tmux
+  passes Alacritty's on (`tmux send-keys -l $'\e[<0;6;6M'` …): a drag copied
+  `quick brown`, a double-click `fox`, and a triple-click the whole line (with pier's
+  one-column margin, as pi's would). Copies go through pi's `copyToClipboard`, which on
+  this desktop runs `wl-copy`; read back with `wl-paste`. Not tried with a real mouse,
+  which tmux (`mouse on`) passes on the same way.
+
+  **Links open with Shift+click, through Alacritty; pier passes no `openUrl`.** Will
+  decided (2026-11-16) to make tmux pass hyperlinks on rather than give pier an opener
+  of its own (pi's `openBrowser` isn't exported): *"Yes, let's do both to my ~/dotfiles:
+  1. Enable hyperlink support in alacritty 2. set-clipboard for the tmux config"*.
+  Dotfiles `1035c03` adds `terminal-features ",alacritty*:RGB:hyperlinks"`; Alacritty
+  needed nothing, as it takes OSC 8 already and its default URL hint opens them. pi-tui
+  emits OSC 8 when tmux's `client_termfeatures` lists `hyperlinks`, which it does for
+  clients attached since; it then shows a link's text alone, not `text (url)`.
+  Shift+click opened one in pi (Will, 2026-11-16). Without Shift, a click opens a link
+  in pi's fullscreen, through `openBrowser`, and does nothing in pier's.
+
+  **Copying over SSH: fixed in dotfiles, with two conditions.** In a session over SSH,
+  `copyToClipboard` sends OSC 52 for the client's terminal. Will's tmux ignored those
+  (`set-clipboard` was tmux's default, `external`); dotfiles `1035c03` sets it `on`.
+  Checked 2026-11-16, with tmux's server log: tmux keeps the copy as a buffer and
+  writes it on to the client, and an OSC 52 printed in a pane reached Wayland's
+  clipboard. The conditions, both seen that day:
+  - tmux forwards only to clients showing the pane's window
+    (`screen_write_set_client_cb`), so a copy from a background window stays a tmux
+    buffer.
+  - Alacritty on Wayland sets the clipboard only while one of its windows has keyboard
+    focus; the same sequence to an unfocused window did nothing.
+  It sets the clipboard, not the primary selection, so it pastes with Ctrl+Shift+V,
+  not middle-click or Shift+Insert. Checked on this machine only: not yet from pi or
+  pier over a real SSH session.
+
+  Not done: Will's own `tuiMode`, `fullscreenCopyOnSelect` and
+  `fullscreenWheelScrollLines` from `settings.json` aren't read; pier takes the flag
+  only, with pi's defaults. That belongs with his settings, under pi's habits.
 
 ### Second: rendering
 
@@ -153,6 +223,10 @@ Will reviews this list first, and throws out what he doesn't really use.
 Will, 2026-11-16: *"Robustness, rendering, then pi's habits (the list of which I'll
 review and throw out any of which I don't really use)"*. The candidates above are in
 that order.
+
+Will, 2026-11-16, of the main and alternate screens: *"Yes, let's do both modes but make
+fullscreen the default - using the same flag that pi uses to switch to the simpler
+terminal mode."* His pi's `settings.json` has `"tuiMode": "fullscreen"`.
 
 ## Done when
 
