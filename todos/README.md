@@ -10,15 +10,6 @@ spec here is deleted. A file sitting in this directory means the work has not be
 
 ## Open
 
-**[poc.md](poc.md) — the proof of concept: a thin slice, then what daily use asks for**
-The gate passed on 2026-10-29 with pi-claude-bridge, and on pi 1.5.2 with Earendil's
-pi-claude-code on 2026-11-13 (39/39), which replaced the bridge that day. The thin
-slice Will chose that day is built: `pier daemon`, a Unix socket, and a minimal
-terminal client, checked offline and by hand with real Claude. Packaged in dotfiles
-since 2026-11-16, as a user service on each NixOS host. Daily use goes on, but isn't a
-gate (Will, 2026-11-16): its findings go into specs of their own. The rest waits on
-Earendil's Pi Roam.
-
 **[wire-format.md](wire-format.md) — wire format and transport: remote access still open**
 The option space for the protocol and for reaching the daemon (Unix socket, SSH,
 loopback, tailnet, a tunnel), with Earendil's p2 as prior art. The local part was

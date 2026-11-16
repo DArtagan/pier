@@ -6,7 +6,8 @@ built under and the ones it learned along the way, mostly between 2026-10-28 and
 when he makes it.
 
 Why pier exists is in `docs/vision.md`. Facts about Durable and pi-claude-code that
-these rest on are in `AGENTS.md`; the history behind them is in `todos/poc.md`.
+these rest on are in `AGENTS.md` and `docs/upstream.md`; the history behind them is in
+`docs/history.md`.
 
 ## 1. pier is a thin bridge, not a product
 
@@ -74,7 +75,7 @@ these rest on are in `AGENTS.md`; the history behind them is in `todos/poc.md`.
   nixpkgs ships.
 - **Watch Earendil's direction.** Before building a new piece, read what's new in
   `apps/p3/docs/` on pi's `main` (status, plan, decisions). Record what changes
-  pier's course in `todos/poc.md`.
+  pier's course in `docs/upstream.md`.
 - **Read the source, from a tagged clone.** npm ships `dist/` only. Verify against code
   and changelogs; don't assume from names or old docs.
 

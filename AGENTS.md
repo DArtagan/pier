@@ -66,6 +66,8 @@ claims with evidence, and leave direction to Will. Code that carries over goes i
   control-group kill reaps them.
 - **No event stream** (1.5): render `Conversation.watch()`, whose entries are a window,
   with `ConversationTranscript` for the rest of the history.
+- More of how Durable behaves (crash recovery, storage, the provider session id, tools'
+  environment) and what's waiting in its next release is in `docs/upstream.md`.
 
 ## Working with pi-claude-code
 

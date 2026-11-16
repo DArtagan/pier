@@ -1,5 +1,5 @@
 // The terminal client: a transcript, a status line and an editor, attached to one
-// conversation in the daemon. Deliberately thin; see todos/poc.md, "The thin slice".
+// conversation in the daemon. Deliberately thin; see docs/history.md, "The thin slice".
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";

@@ -112,6 +112,16 @@ Will reviews this list first, and throws out what he doesn't really use.
   (`conversation.fork(entryId)`). pi's `TreeSelectorComponent` expects pi's session
   tree. This needs a protocol request and a way to pick the entry.
 
+## Prior art
+
+- pi 1.0.0's Durable demo, `packages/coding-agent/src/experimental/durable/tui.ts` at
+  `v1.0.0`: steering, follow-ups, Esc, `/model`, thinking levels and `/compact` on pi's
+  components, using the then-internal `createAllToolRenderers` and
+  `WorkingStatusIndicator`. It rendered `viewState()`, gone in 1.5, so a port means
+  moving it to `watch()` and `ConversationTranscript`.
+- p2's TUI (`apps/p2/src/hosts/tui.ts`, and its plugins' `tui.ts` facets): current,
+  but built on Chord v2's app kit.
+
 ## How to check
 
 - **Offline tests** for anything with logic outside drawing: protocol requests, the
