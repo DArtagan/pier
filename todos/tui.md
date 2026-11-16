@@ -43,8 +43,11 @@ and list themes:
   empty, as Ctrl+D does.
 - **Commands:** `/new`, `/resume [all | <number>]`, `/earlier`, `/compact`,
   `/thinking`, `/detach`, `/quit`, `/exit`, `/help`.
-- **Not done:** reconnecting. When the daemon restarts, the client says so and exits;
-  run `pier` again and it continues.
+- **Reconnecting** (landed 2026-11-16): when the connection drops, the client retries
+  (250 ms, doubling to 2 s) until the daemon is back, then reattaches and resumes the
+  transcript with only what it missed. The status line says `reconnecting…`; text sent
+  meanwhile stays in the editor; Ctrl+C leaves. It gives up only when the daemon
+  refuses (another protocol version, or the conversation is gone).
 
 ## Candidates
 
@@ -52,9 +55,22 @@ In the order Will chose (below).
 
 ### First: robustness
 
-- **Reconnect after a daemon restart.** `AttachedConversation` can already resume a
-  transcript (`ConversationTranscript.resume`); the TUI exits instead of retrying.
-  This matters once the daemon runs as a service that restarts.
+- **Reconnect after a daemon restart: done** (2026-11-16). `connectWhenUp()` and
+  `AttachedConversation.reattach()` in `src/host/client.ts`, tested offline across a
+  restart. By hand in tmux with real Claude, the same day: the daemon stopped while
+  idle for 25 s, stopped mid-run during a bash `sleep 20` (Durable resumed the run, bash
+  came back interrupted, and Claude's answer reached the same pane), and SIGKILLed,
+  leaving a stale socket. Found on the way, and fixed:
+  - `PierClient.request` on a closed connection never settled: ws drops the send
+    without a word.
+  - A failed attach (`/resume 99`) detached the connection first, freezing the pane on
+    a view nothing updated any more; the daemon now opens the target first.
+  - With no `error` listener after connecting, a socket error would have thrown out of
+    the client.
+- **Gaps.** After a long outage, or a client too slow for the view's window, the
+  transcript holds a gap ("… some messages aren't loaded"), and nothing fills it:
+  `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
+  seen in the runs by hand, whose outages missed fewer entries than the window holds.
 - **Long transcripts.** Every update rebuilds the transcript's component list,
   reusing cached components for finished entries. Unmeasured past a few hundred
   entries.

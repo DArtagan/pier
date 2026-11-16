@@ -31,6 +31,7 @@ import { createPrompt } from "../layer/prompt.ts";
 import {
 	type AttachTarget,
 	type ConversationSummary,
+	DAEMON_CLOSING,
 	type Event,
 	type Method,
 	type Methods,
@@ -183,7 +184,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			for (const timer of releases.values()) clearTimeout(timer);
 			releases.clear();
 			runs.detach();
-			await Promise.all([...connections].map((connection) => connection.end("the daemon is closing")));
+			await Promise.all([...connections].map((connection) => connection.end(DAEMON_CLOSING)));
 			for (const socket of sockets.clients) socket.close(1001, "closing");
 			await new Promise<void>((resolve) => sockets.close(() => resolve()));
 			await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -395,8 +396,9 @@ class Connection {
 	}
 
 	async #attach(params: Methods["attach"]["params"]): Promise<Methods["attach"]["result"]> {
-		await this.detach();
+		// Opened before the old view is let go, so a target that isn't there leaves it attached.
 		const { conversation, number, created } = await this.#conversations.open(params.target, params.cwd);
+		await this.detach();
 		await conversation.commit(async (tx) => {
 			(await tx.doc(ClientEnvDoc, conversation.id)).vars = { ...params.env };
 		}, context);
