@@ -404,6 +404,75 @@ Found 2026-11-12 in the pi repo at v1.5.2, `apps/`. Neither is published.
   links and SAML as sign-ins, but Pi Roam's remote access and backups are Radius
   features. pier's equivalents are the tailnet, and backing up a SQLite file.
 
+### p3 as of 2026-11-16 (pi's `main` at `742d49fcd`)
+
+Over the weekend of 2026-11-13 to 16, p3 went from design notes to code: 67 commits,
+about 17,000 lines. Read from `apps/p3/` on `main`. There's no new pi release; 1.5.2 is
+still the latest.
+
+- **What it is now** (`docs/overview.md`): "one Pi per person, built on Chord v2 and its
+  app kit". It has one owner, who installs every plugin; plugins are trusted, and only
+  people are confined. Almost everything is a plugin: the harness, models,
+  environments, coding tools, the prompt, the transcript, people, apps, views, Radius.
+  Its data directory is `~/.pi/p3`, and it starts empty, with no migration from p2.
+- **Built:** slice 1, base and sessions, with a worker per session, committed
+  `0db9861ec`.
+  - Measured on Earendil's machine: an idle worker is 29.5 MiB (p2's were 170–290),
+    a warm worker start 99 ms, the server about 111 MiB.
+  - It has no harness, models or chat yet.
+- **Slice 26, the release:** "built (first part)" in Earendil's checkout but not on
+  `main` (code is committed only after the owner reviews it). Decided:
+  - a shipped package, `@earendil-works/p3`, with a plugin API (`@earendil-works/p3/v1`)
+    that third-party plugins type-check against;
+  - a `p3` command (`server`, `status`, `stop`, `restart`) with a background supervisor;
+  - several Pis on one machine (`--pi`, `--dir`).
+
+  So p3 is meant to be installable and self-hosted, which pier's Open question 1
+  didn't know.
+- **Build order** (`docs/slices/README.md`):
+  1. 26, the release;
+  2. 27, a terminal client scaffold;
+  3. 25, sign-in with Radius;
+  4. 28, telemetry;
+  5. 2, applying changes;
+  6. then 3 (talk to a session, with a faux model), 7 (models), 8 (environments and
+     coding tools), 9 (prompt: AGENTS.md and skills by location), and the rest.
+
+  A real chat in p3 is therefore several slices away. "No deadline planning from
+  agents' estimates" (decision of 2026-11-14).
+- **Dates:** the "Direction" decision of 2026-11-13 records "Colin's plan: Dec 1 Pi
+  Roam, Dec 18 Org Devices (each member their own Pi on an org machine), February
+  hosted". Whether the 1 December Pi Roam is p3, or p2 under that name, isn't said.
+- **Sign-in without Radius is first-class** (decisions of 2026-11-16):
+  - Identity providers are a registry: Radius, this device, and pairing. A new
+    device shows a short code, which a signed-in device approves (`p3 pair <code>`).
+  - There's no owner password.
+  - Remote requests are accepted for any host name (a tunnel, a LAN or tailnet
+    address), with sign-in cookies bound to the host used.
+
+  So a p3 reached over the tailnet needn't involve Radius. Radius stays the planned
+  relay and backup service (slice 21).
+- **Chord's app kit moves into p3** (2026-11-14) and is cut to what p3 uses; Chord
+  keeps its general parts. That confirms `todos/wire-format.md`'s choice against
+  building on the app kit (option C).
+- **Models are plugins** ("plugins can provide model providers", decision of
+  2026-11-06), so pi-claude-code, a plain pi-ai provider, fits a p3 models plugin. p3's
+  docs never mention Claude Code or Claude subscriptions; the gap pier works around
+  (Claude Code's working directory) would exist there too, if p3 runs several
+  conversations' requests from one process.
+- **For pier:** nothing in it asks pier to change course. The thin slice stays thin.
+  pier's extensions (prompt, directories) would be replaced by p3's plugins rather
+  than ported, as `docs/principles.md` expects; its provider would carry over. Worth
+  re-checking in early December, against the 1 December date and whether slices 3, 7,
+  8 and 9 and the terminal client have landed.
+- **Unreleased in pier's packages** (on `main`, for the next bump):
+  - Durable lets a tool park (suspendable work) and renames `RunEndTask` to
+    `HookTask`. Neither is used by pier.
+  - It moves `pi.tool` to version 4 and `pi.generation` to version 3, so a store
+    written after the bump can't be opened by pier's current Durable again.
+  - Chord's workers and telemetry change, which pier doesn't use.
+  - pi-claude-code is unchanged since the commit pier pins (`d5b5e04`, 2026-11-05).
+
 ### Earendil's Claude Code provider: pi-claude-code
 
 `@earendil-works/pi-claude-code` 0.1.0 (<https://github.com/earendil-works/pi-claude-code>,
