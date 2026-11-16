@@ -80,10 +80,29 @@ In the order Will chose (below).
   transcript holds a gap ("… some messages aren't loaded"), and nothing fills it:
   `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
   seen in the runs by hand, whose outages missed fewer entries than the window holds.
-- **Long transcripts.** Every update rebuilds the transcript's component list,
-  reusing cached components for finished entries, and fullscreen's scroll view lays out
-  the whole transcript each frame, as pi's does. Unmeasured past a few hundred
-  entries; measure it fullscreen.
+- **Long transcripts: measured, fine fullscreen** (2026-11-16,
+  `node --expose-gc experiments/transcript/bench.ts`). Each update from the daemon
+  refills the transcript (`fillTranscript`, reusing stored entries' components, which
+  `test/tui.test.ts` checks), and each frame lays out the whole transcript, as pi's
+  does. With an answer streaming at 120×50, six entries a turn (two of them 20-line tool
+  results):
+
+  | Entries | Lines | Fill, p50 | Frame fullscreen, p50 / p95 | Frame regular, p50 / p95 | Heap fullscreen |
+  |---|---|---|---|---|---|
+  | 100 | 1,080 | <0.01 ms | 0.14 / 0.17 ms | 0.39 / 0.49 ms | 5 MiB |
+  | 1,000 | 10,800 | 0.02 ms | 0.20 / 0.32 ms | 3.1 / 4.3 ms | 8 MiB |
+  | 3,000 | 32,400 | 0.04 ms | 0.38 / 0.54 ms | 10.9 / 14.9 ms | 19 MiB |
+  | 10,000 | 108,000 | 0.18 ms | 1.2 / 3.6 ms | 41.7 / 45.3 ms | 59 MiB |
+
+  How long they get: Will's classic pi sessions since October (121) have a median of 79
+  messages, a 90th percentile of 410, a 99th of 1,079, and at most 1,687 (counted
+  2026-11-16); a message is about one entry. A pier client holds only what it loaded:
+  the newest 50 on attaching, then what streams in and what `/earlier` brings, 50 at a
+  time, so the first frame of thousands of new entries at once (430 ms at 10,000) doesn't
+  happen in use. Fullscreen needs nothing. Regular mode is pi-tui's `TuiMainScreen`,
+  which diffs every line each frame: about 5 ms a frame at Will's longest session, up to
+  60 frames a second while an answer streams. It's the renderer pi's regular mode uses,
+  so a fix belongs upstream; not raised.
 - **Main screen or alternate screen: both, fullscreen by default** (2026-11-16). By
   hand in tmux with real Claude, the same day: a 60-line answer scrolled with PageUp,
   Ctrl+Home and Ctrl+End, with the scrollbar and the "Jump to latest message · Ctrl+End"

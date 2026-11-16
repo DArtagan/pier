@@ -119,22 +119,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	const render = () => {
 		if (view === undefined) return;
-		transcript.clear();
-		for (const item of view.items) {
-			if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
-			else if (item.kind === "gap") transcript.addChild(new Text(dim("… some messages aren't loaded"), 1, 0));
-			else {
-				let component = rendered.get(item.entry.id);
-				if (component === undefined) {
-					component = renderEntry(item.entry, markdownTheme);
-					rendered.set(item.entry.id, component);
-				}
-				transcript.addChild(component);
-			}
-		}
-		for (const component of renderLive(live(), view.docs["pi.inbox"] as InboxState | undefined, markdownTheme)) {
-			transcript.addChild(component);
-		}
+		fillTranscript(transcript, view, rendered, markdownTheme);
 		status.setText(statusLine(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
@@ -347,7 +332,7 @@ function fullscreen(terminal: Terminal): TuiAltScreen {
  * The transcript scrolling above a dock that keeps the status and the editor in view, as
  * pi's `createChatViewport` lays them out (not exported in 1.5.2).
  */
-function chatLayout(transcript: Component, above: readonly Component[], editor: Component): Component {
+export function chatLayout(transcript: Component, above: readonly Component[], editor: Component): Component {
 	const scrolling = new ScrollView(transcript, {
 		follow: "end",
 		primary: true,
@@ -379,6 +364,35 @@ function leaveFullscreen(tui: TuiAltScreen, components: readonly Component[]): v
 	main.invalidate();
 	main.renderNow();
 	main.stop();
+}
+
+/**
+ * Fill `transcript` with `view`'s entries and live state, reusing the components in
+ * `rendered` for entries drawn before: entries never change once stored.
+ */
+export function fillTranscript(
+	transcript: Container,
+	view: TranscriptView,
+	rendered: Map<EntryId, Component>,
+	markdown: MarkdownTheme,
+): void {
+	transcript.clear();
+	for (const item of view.items) {
+		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
+		else if (item.kind === "gap") transcript.addChild(new Text(dim("… some messages aren't loaded"), 1, 0));
+		else {
+			let component = rendered.get(item.entry.id);
+			if (component === undefined) {
+				component = renderEntry(item.entry, markdown);
+				rendered.set(item.entry.id, component);
+			}
+			transcript.addChild(component);
+		}
+	}
+	const live = (view.docs["pi.live"] ?? {}) as LiveState;
+	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, markdown)) {
+		transcript.addChild(component);
+	}
 }
 
 function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
