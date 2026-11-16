@@ -2,15 +2,16 @@
 
 ## Opening prompt
 
-> Read `todos/poc.md`, starting with "The thin slice". It's built; what's left is
-> under "Not done yet" there, in the order given, and packaging in dotfiles
-> (`todos/pi-durable.md`). Work within `docs/principles.md`: nothing p3 will own, and
+> Read `todos/poc.md`, starting with "The thin slice". It's built, and packaged in
+> dotfiles (`modules/pi/pier.nix`, a user service on each NixOS host); what's left is
+> under "Not done yet" there, in the order given. Work within `docs/principles.md`: nothing p3 will own, and
 > everything agent-side as Durable extensions and documents. Before building more,
 > check `apps/p3/docs/` on pi's `main` for what Earendil has decided since. Update
 > this spec as facts change.
 
 Moved here from dotfiles' `todos/pi-durable.md` on **2026-10-29**, when step 1 passed.
-That file now tracks only the Nix side (packaging and the home-manager module).
+That file then tracked only the Nix side, and was deleted when the packaging landed
+(2026-11-16).
 Facts under *What exists* were first read from source on 2026-10-28 (pi **v1.4.0**,
 pi-claude-bridge **0.9.3**). **Re-checked 2026-11-12** against pi **1.5.2** and
 pi-claude-bridge **0.12.0**, which pier now pins, from their changelogs and source (a
@@ -127,21 +128,35 @@ exception (`docs/principles.md`, section 1; `todos/web.md`).
 
 ### Not done yet, in order
 
-1. **Use it daily**, and fix what that turns up.
-2. **Packaging** in dotfiles (`todos/pi-durable.md`): a user service, and `pier` on
-   the PATH. The build step it needed is done (2026-11-16): Node won't strip types
-   under `node_modules`, where `buildNpmPackage` puts a package, so `npm run build`
-   compiles `src/` to `dist/` with `tsc` (already a dependency, so not esbuild), and the
-   bin runs `dist/host/cli.js`; `files` ships only `dist/`. Checked that day:
-   - `npm pack`, installed into a scratch project: the daemon started from
-     `node_modules` (loading pi-claude-code through jiti), `pier list` answered, and a
-     real Claude turn in tmux ran `pwd` with bash in the conversation's directory.
-   - A scratch `buildNpmPackage` on nixpkgs 26.11pre (`nodejs_24`, `npmDepsHash` from
-     `prefetch-npm-deps package-lock.json`) built it with no extra settings: the
-     pi-claude-code tarball from codeload fetched like any other, and devDependencies
-     were pruned. The output is 55 MiB, its closure 331 MiB. Its `bin/pier` started
-     the daemon and answered `pier list`. The expression is in dotfiles'
-     `todos/pi-durable.md`, as a starting point for `pkgs/pier`.
+1. **Use it daily**, and fix what that turns up. Not a gate: Will, 2026-11-16, *"We can
+   move on without completing the 'using pier daily', as any findings I have from that
+   will go into future specs."*
+2. ~~**Packaging**~~ in dotfiles: done 2026-11-16 (dotfiles #11, on pier v0.2.0).
+   `pkgs/pier` builds a release tag with `buildNpmPackage`, and `modules/pi/pier.nix`
+   puts `pier` on the PATH and runs `pier daemon` as a user service, started at login,
+   on thenixbeast and the Steam Deck (Will's choices that day). The setup, and why each
+   unit setting is there, is in dotfiles' `modules/pi/README.md`, "pier"; bumping it in
+   `modules/pi/UPDATING.md`. What it took:
+   - **A build step here** (pier #6): Node won't strip types under `node_modules`,
+     where `buildNpmPackage` puts a package, so `npm run build` compiles `src/` to
+     `dist/` with `tsc` (already a dependency, so not esbuild), the bin runs
+     `dist/host/cli.js`, and `files` ships only `dist/`. Installed with `npm pack`
+     into a scratch project, it ran a real Claude turn. `fetchNpmDeps` took the
+     pi-claude-code codeload tarball like any other. The closure is 331 MiB.
+   - **The unit** keeps a running daemon across switches (`X-SwitchMethod=keep-old`,
+     read from sd-switch 0.6.4's source; not yet watched in a switch), spells out
+     `KillMode=control-group`, and points `PI_CLAUDE_CODE_COMMAND` at nixpkgs'
+     `claude-code` and `GIT_CONFIG_GLOBAL` at the agents' git config.
+   - **Checked with the unit's command and environment** under `systemd-run`, before
+     the first switch: a tool saw the pane's environment and the unit's
+     `GIT_CONFIG_GLOBAL`; a stop mid-tool killed the tool and left nothing running;
+     after a restart the turn finished unasked. The daemon idles at about 210 MiB.
+     After the switch, the service ran on thenixbeast on the real socket and storage.
+   - **A stop under systemd differs from a bare SIGTERM.** systemd signals the whole
+     cgroup at once, so a running bash call dies with exit code 143 while the daemon
+     is still up, and is stored as a failed command rather than "interrupted". The
+     model still learns it was killed, and it isn't rerun. `KillMode=mixed` would
+     signal the daemon first; not tried.
 3. **Rendering**: diffs for edits, images, the footer's cost and context.
 4. **What pi has that's missed most**, judged by use: `!` bash, `@file`, `/fork`,
    `/model`.
@@ -700,7 +715,7 @@ isolating failures.
    templates.
 5. **Packaging**, in dotfiles: `pkgs/pier`, built from pier's own lockfile, and a
    module under `modules/pi/` next to the classic setup, which stays installed
-   throughout. Tracked in dotfiles' `todos/pi-durable.md`.
+   throughout. Done 2026-11-16 (above, "Not done yet").
 
 ## Daemon behaviour that differs from vanilla pi
 
@@ -726,8 +741,8 @@ isolating failures.
 - **Restarts interrupt every pane.** home-manager restarts a changed user service
   on switch. Durable resumes everything (the gate showed a turn finishing after a
   kill), but bash and other tools not safe to rerun come back as "interrupted".
-  Configure the unit so switches don't restart it (the exact home-manager setting
-  is unchecked), and restart it deliberately when idle.
+  The unit keeps a running daemon across switches (`X-SwitchMethod=keep-old`, since
+  2026-11-16), to be restarted deliberately when idle.
 - **Gained:** two panes on one session both see it live and can both steer it.
 - **Resources:** each active turn's Claude Code child process lives in the
   service's cgroup, so a memory limit or restart affects every session.
@@ -756,7 +771,9 @@ As written on 2026-10-28, with where the thin slice stands (2026-11-13):
   covered by the offline tests, the environment by one of them, not yet by daily use.*
 - A claude-bridge turn with tools, interrupted by `systemctl --user restart`,
   finishes after the restart without being asked again. *Done by hand with
-  pi-claude-code and a SIGTERM; there's no unit yet.*
+  pi-claude-code and a SIGTERM (2026-11-13), and with the unit's command and
+  environment under `systemd-run` (2026-11-16): the call came back as exit code 143
+  rather than interrupted (see "Not done yet", 2).*
 - The flows used day to day work as in vanilla pi: prompt, steer, follow-up, Esc,
   `/model`, thinking, `/compact`, `/new`, `/resume`, `/fork`, `/tree`, `!`, `@file`.
   *Prompt, steer, follow-up, Esc, thinking, `/compact`, `/new` and `/resume` are

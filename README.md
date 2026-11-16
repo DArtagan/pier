@@ -12,7 +12,7 @@ forks (pi 1.5.2, 2026-11-13). See [`todos/`](todos/) for what's next.
 ## Use
 
 ```bash
-pier daemon           # the daemon, in the foreground (packaged as a user service later)
+pier daemon           # the daemon, in the foreground (dotfiles runs it as a user service)
 pier                  # in a project: continue its newest conversation, or start one
 pier new              # start a new one
 pier resume <n>       # attach to conversation #<n>

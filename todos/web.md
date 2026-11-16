@@ -125,8 +125,8 @@ phone first. One owner; nothing for several users, nothing public, no Radius.
    Pin Elanor's packages exactly.
 4. **The tailnet,** with the sign-in Will chose: listen on the tailnet interface too,
    never a public one. Try it on the phone.
-5. **Packaging:** the web UI comes with pier's Nix package and service
-   (`todos/pi-durable.md` in dotfiles).
+5. **Packaging:** the web UI comes with pier's Nix package and service (dotfiles'
+   `modules/pi/pier.nix`).
 
 ## Done when
 
