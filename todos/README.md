@@ -4,7 +4,7 @@ Transient work specs. Each is self-contained: enough verified context to start a
 session cold, plus a prompt to open with.
 
 These are **not** documentation of what's built; that lives in
-[`README.md`](../README.md) and [`CLAUDE.md`](../CLAUDE.md). When a piece of work
+[`README.md`](../README.md) and [`AGENTS.md`](../AGENTS.md). When a piece of work
 lands, whatever it leaves behind that is permanently true gets written there, and the
 spec here is deleted. A file sitting in this directory means the work has not been done.
 

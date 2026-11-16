@@ -129,9 +129,19 @@ exception (`docs/principles.md`, section 1; `todos/web.md`).
 
 1. **Use it daily**, and fix what that turns up.
 2. **Packaging** in dotfiles (`todos/pi-durable.md`): a user service, and `pier` on
-   the PATH. Node won't strip types under `node_modules`, which is where
-   `buildNpmPackage` puts a package, so pier needs a build step (esbuild or `tsc`)
-   first.
+   the PATH. The build step it needed is done (2026-11-16): Node won't strip types
+   under `node_modules`, where `buildNpmPackage` puts a package, so `npm run build`
+   compiles `src/` to `dist/` with `tsc` (already a dependency, so not esbuild), and the
+   bin runs `dist/host/cli.js`; `files` ships only `dist/`. Checked that day:
+   - `npm pack`, installed into a scratch project: the daemon started from
+     `node_modules` (loading pi-claude-code through jiti), `pier list` answered, and a
+     real Claude turn in tmux ran `pwd` with bash in the conversation's directory.
+   - A scratch `buildNpmPackage` on nixpkgs 26.11pre (`nodejs_24`, `npmDepsHash` from
+     `prefetch-npm-deps package-lock.json`) built it with no extra settings: the
+     pi-claude-code tarball from codeload fetched like any other, and devDependencies
+     were pruned. The output is 55 MiB, its closure 331 MiB. Its `bin/pier` started
+     the daemon and answered `pier list`. The expression is in dotfiles'
+     `todos/pi-durable.md`, as a starting point for `pkgs/pier`.
 3. **Rendering**: diffs for edits, images, the footer's cost and context.
 4. **What pi has that's missed most**, judged by use: `!` bash, `@file`, `/fork`,
    `/model`.
@@ -321,7 +331,7 @@ What it took, and what was wrong in the original plan:
   harness (storage, tasks, conversations, extensions, compaction), not an app.
   Announcement: <https://earendil.com/posts/pi-durable>. README and examples:
   `packages/durable/` in <https://github.com/earendil-works/pi>, and in nixpkgs'
-  build (see `CLAUDE.md`).
+  build (see `AGENTS.md`).
 - **The coding agent (`pi`) does not use it.** `packages/coding-agent/package.json`
   doesn't depend on it.
 - **There is no first-party server or client.** pi 1.2.0 removed "the unreleased
@@ -411,6 +421,10 @@ Found 2026-11-12 in the pi repo at v1.5.2, `apps/`. Neither is published.
 Over the weekend of 2026-11-13 to 16, p3 went from design notes to code: 67 commits,
 about 17,000 lines. Read from `apps/p3/` on `main`. There's no new pi release; 1.5.2 is
 still the latest.
+
+Re-checked later on 2026-11-16, at `ac78a60`, before the build step: two p3 doc commits
+(Windows is a target, and a running server proves its identity over HTTP; worker memory
+measurements and levers in slice 7). Nothing for pier, and still no release after 1.5.2.
 
 - **What it is now** (`docs/overview.md`): "one Pi per person, built on Chord v2 and its
   app kit". It has one owner, who installs every plugin; plugins are trusted, and only

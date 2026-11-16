@@ -55,6 +55,7 @@
 
   enterTest = ''
     npm run check
+    npm run build
     npm test
   '';
 }

@@ -19,7 +19,8 @@ pier resume <n>       # attach to conversation #<n>
 pier list [--all]     # conversations here (or everywhere)
 ```
 
-Until it's packaged, `npm run pier -- <args>`, or `node src/host/cli.ts`. In the client,
+In this repo, `npm run pier -- <args>`, or `node src/host/cli.ts`; the package (dotfiles
+builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
 the run carries on. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
@@ -59,6 +60,7 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 direnv allow          # once; or `devenv shell`. Installs node_modules and the git hooks.
 npm test              # offline unit tests (also a pre-commit hook)
 npm run check         # typecheck (also a pre-commit hook)
+npm run build         # compile src/ to dist/, which the package's `pier` runs
 devenv test           # both
 npm run gate          # the gate: about twenty Opus turns on your Claude Code login
 ```

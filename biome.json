@@ -4,6 +4,6 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["**", "!**/node_modules", "!**/.devenv", "!**/.direnv"]
+		"includes": ["**", "!**/node_modules", "!**/dist", "!**/.devenv", "!**/.direnv"]
 	}
 }
