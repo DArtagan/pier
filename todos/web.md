@@ -77,8 +77,9 @@ Until 2026-11-16, `docs/principles.md` ruled a web UI out (*"Don't build what p3
   instead of the `ws` package. Durable's `ConversationTranscript` and Chord's
   `applyImmutable` reach no Node modules from their entry points (checked statically,
   2026-11-16; not yet bundled for a browser).
-- **A build step.** esbuild would bundle the page. pier needs a build step for its Nix
-  package anyway (`todos/pi-durable.md` in dotfiles).
+- **A build step.** esbuild would bundle the page. pier has one for its Nix package
+  since 2026-11-16, `tsc` to `dist/` (`npm run build`); the page's bundle would join it
+  there.
 - **Sign-in.** On the Unix socket, file permissions decide who connects; on TCP,
   nothing does. Options:
   - loopback only, with a token from a private file;
@@ -116,7 +117,7 @@ phone first. One owner; nothing for several users, nothing public, no Radius.
 
    Use `todos/wire-format.md`'s transport table and p3's slice 25 ("Decided since")
    as starting points. Put the options to Will; record his choice here.
-2. **A build step and a listener on loopback.** Bundle the page with esbuild; the
+2. **A bundle and a listener on loopback.** Bundle the page with esbuild; the
    daemon serves it, and the protocol over WebSocket, on a loopback TCP port. Make the
    browser client from `src/host/client.ts`, and check that Durable's and Chord's
    client pieces really bundle for a browser.

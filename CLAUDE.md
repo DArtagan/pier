@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 pier runs pi on Pi Durable (`@earendil-works/pi-durable`): one daemon per host owns
 every session, and clients attach to it. TypeScript on Node 24, run directly with
-Node's type stripping (no build step). Claude is reached through Claude Code, with
+Node's type stripping in development; `npm run build` compiles it for packaging. Claude is reached through Claude Code, with
 Earendil's pi-claude-code provider. See `README.md` for the layout.
 
 **Read `docs/vision.md` and `docs/principles.md` first.** The vision says what pier is
@@ -20,7 +20,11 @@ claims with evidence, and leave direction to Will. Code that carries over goes i
 - `direnv allow` once (or `devenv shell`): Node, npm install, and the git hooks.
 - `npm test`: offline unit tests (vitest). `npm run check`: `tsc --noEmit`. Both run as
   pre-commit hooks, alongside biome, nixfmt, deadnix, statix, shellcheck and the
-  whitespace fixers. `devenv test` runs both.
+  whitespace fixers. `devenv test` runs both, and the build.
+- `npm run build`: `tsc` compiles `src/` to `dist/`, which the `pier` bin runs. Node
+  won't strip types under `node_modules`, where a package lands (`buildNpmPackage` in
+  dotfiles). So nothing in `src/` may lean on type stripping at run time: no `.ts` file
+  read, or imported from outside `src/` (pi-claude-code's go through jiti).
 - `npm run gate`: the gate, against the real Claude Code. It costs about twenty Opus
   turns on Will's subscription, and takes about fifteen minutes (a 6-minute idle
   measures the prompt cache; `PIER_GATE_IDLE_MINUTES=0` skips it). Run it when the
