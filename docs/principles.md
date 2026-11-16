@@ -6,7 +6,7 @@ built under and the ones it learned along the way, mostly between 2026-10-28 and
 when he makes it.
 
 Why pier exists is in `docs/vision.md`. Facts about Durable and pi-claude-code that
-these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
+these rest on are in `AGENTS.md`; the history behind them is in `todos/poc.md`.
 
 ## 1. pier is a thin bridge, not a product
 
@@ -122,7 +122,7 @@ these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
 
 ## 6. Hard-won constraints
 
-Each cost a failure to learn. Detail is in `CLAUDE.md`; new work must respect them.
+Each cost a failure to learn. Detail is in `AGENTS.md`; new work must respect them.
 
 - **Signals:** an invocation's abort signal fires when the invocation ends, normally
   too. Nothing that outlives a task phase may hold it.
@@ -150,7 +150,7 @@ Each cost a failure to learn. Detail is in `CLAUDE.md`; new work must respect th
   releases, upstream issues, anything published. An OK for one push isn't one for the
   next.
 - **Specs in `todos/`** carry verified context and an opening prompt, and are deleted
-  when their work lands. What stays true moves to `README.md`, `CLAUDE.md` or `docs/`.
+  when their work lands. What stays true moves to `README.md`, `AGENTS.md` or `docs/`.
 - **Commits are Conventional Commits**, each passing the hooks on its own.
   - When a hook rewrites files, stage them and make a fresh commit; never amend
     blindly.

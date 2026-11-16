@@ -331,7 +331,7 @@ What it took, and what was wrong in the original plan:
   harness (storage, tasks, conversations, extensions, compaction), not an app.
   Announcement: <https://earendil.com/posts/pi-durable>. README and examples:
   `packages/durable/` in <https://github.com/earendil-works/pi>, and in nixpkgs'
-  build (see `CLAUDE.md`).
+  build (see `AGENTS.md`).
 - **The coding agent (`pi`) does not use it.** `packages/coding-agent/package.json`
   doesn't depend on it.
 - **There is no first-party server or client.** pi 1.2.0 removed "the unreleased
