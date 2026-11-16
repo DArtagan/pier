@@ -3,7 +3,7 @@
 ## Opening prompt
 
 > Read `todos/wire-format.md`. The local protocol is built (see "Decided" and
-> `todos/poc.md`, "The thin slice"). Remote access is decided in outline (Will,
+> `docs/history.md`, "The thin slice"). Remote access is decided in outline (Will,
 > 2026-11-16: a web UI, locally and on the tailnet, phone first; see `todos/web.md`).
 > What's left is how it signs in, which is step 1 of `todos/web.md`. Use the option
 > space below for that deep dive, then fold what's still useful into `todos/web.md`
@@ -34,7 +34,8 @@ the option space for me."*
   and web and terminal clients. Earendil's own pi UI prototype, p2, runs on it.
 - **Earendil is building this project.** p2 is a self-hosted Pi Durable server with
   web and terminal clients, and p3 ("Pi Roam") is its successor. See "Earendil's own
-  server" below, and Open question 1 in `todos/poc.md`.
+  server" below. Will chose pier's thin slice over waiting for p3 on 2026-11-13
+  (`docs/history.md`).
 - **The tailnet question is answered:** headscale can't give `tailscale serve`
   certificates here (dotfiles, 2026-11-11).
 
@@ -50,11 +51,11 @@ taken as the recommendations, without Will answering them one by one:
 4. The Unix socket only, with SSH for other hosts.
 
 Question 5 (an ACP adapter) wasn't taken up. Built as `src/host/protocol.ts`; see
-`todos/poc.md`, "The thin slice".
+`docs/history.md`, "The thin slice".
 
 Already decided before: one SQLite storage for all
 conversations, the whole client environment passed through, and `/quit`, `/exit` and
-`/detach` as proposed (all Will, 2026-10-29; see `todos/poc.md`).
+`/detach` as proposed (all Will, 2026-10-29; see `docs/history.md`).
 
 ## The short version
 
@@ -346,8 +347,9 @@ them; only the listener and the sign-in do.
 ## Questions for Will
 
 1. **Semantics:** A (Durable's view plus commands; recommended), C (Chord v2's app
-   kit), or F (bespoke)? B no longer exists. Your answer to `todos/poc.md`'s Open
-   question 1 (pier or Pi Roam) bears on this: C is the way to stay close to p3.
+   kit), or F (bespoke)? B no longer exists. Your answer on pier or Pi Roam bears on
+   this: C is the way to stay close to p3. (Taken as A with the thin slice, 2026-11-13;
+   see "Decided".)
 2. **Envelope:** for A, a minimal pier-owned JSON envelope (requests with ids,
    responses, subscriptions; recommended), or Chord v2 from the start?
 3. **Framing:** JSON in WebSocket messages everywhere (recommended), or JSON lines
@@ -355,7 +357,8 @@ them; only the listener and the sign-in do.
 4. **Transport for step 2:** the Unix socket only, with SSH for other hosts
    (recommended), deferring the remote listener and its sign-in to the web client?
 5. **ACP:** worth a later step (`pier acp`, so Zed and ACP apps can attach)? If
-   so, it goes in `todos/poc.md`'s build order after the TUI.
+   so, it goes after the terminal client (`docs/vision.md` lists it under "If daily
+   use asks").
 
 ## Sources
 

@@ -53,6 +53,9 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 - `docs/vision.md` says what pier is for, and how it changes as p3 does.
 - `docs/principles.md` holds the principles all work on pier keeps to.
 - `docs/releasing.md` says how release-please makes versions.
+- `docs/history.md` records Will's decisions, the gate's findings and the wrong turns.
+- `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
+  going, as last read.
 
 ## Commands
 
@@ -94,7 +97,23 @@ Things a host must know, all found by the gate:
   written with a 1-hour lifetime.
 
 Until 2026-11-13 pier used pi-claude-bridge instead, through a shim standing in for
-pi's extension API. It's in git history, and `todos/poc.md` records what it took.
+pi's extension API. It's in git history, and `docs/history.md` records what it took.
+
+## Known gaps
+
+- A tool call has no timeout unless the model sets one: Durable's bash has no default.
+- One environment per conversation: two panes in different shells on one conversation
+  take turns deciding it.
+- `pier` (continue) scans up to 500 conversations each time.
+- The protocol has no backpressure: a slow client's socket buffers.
+- The socket is chmodded to 0600 just after it starts listening; in its 0700 directory
+  that gap doesn't matter.
+- The prompt loads skills from pi's default locations only: `createPrompt()` takes
+  `skillPaths`, but the daemon passes none, so skills listed in `settings.json`
+  (dotfiles adds ketch's there) don't reach pier's Claude (read from the code,
+  2026-11-16).
+- Not tried with real Claude: steering a run (Enter while Claude works) through
+  pi-claude-code, and images.
 
 ## Versions
 
