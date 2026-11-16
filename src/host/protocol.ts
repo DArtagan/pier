@@ -12,6 +12,7 @@ import type {
 	ConversationId,
 	ConversationView,
 	ConversationWindow,
+	Cursor,
 	EntryId,
 	EntryRecord,
 	SubmissionId,
@@ -19,7 +20,7 @@ import type {
 } from "@earendil-works/pi-durable";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Which conversation `attach` opens. */
 export type AttachTarget =
@@ -70,10 +71,14 @@ export interface Methods {
 	configure: { params: { thinkingLevel?: ModelThinkingLevel }; result: Record<string, never> };
 	/** Conversations, newest first, in one directory if `cwd` is given. */
 	list: { params: { cwd?: string; limit?: number }; result: { conversations: ConversationSummary[] } };
-	/** A page of the attached conversation's entries, for `ConversationTranscript`'s loader. */
+	/**
+	 * A page of the attached conversation's entries, for `ConversationTranscript`'s loader.
+	 * `next` is Durable's cursor, present when more entries match: the transcript takes a
+	 * page without one to mean it reached the start, or that a gap is filled.
+	 */
 	entries: {
 		params: { minEntryId?: EntryId; maxEntryId?: EntryId; order?: "ascending" | "descending"; limit: number };
-		result: { entries: EntryRecord[] };
+		result: { entries: EntryRecord[]; next?: Cursor };
 	};
 }
 

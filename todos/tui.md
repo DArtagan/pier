@@ -42,7 +42,7 @@ themes:
 - **The transcript:** user messages, answers as Markdown, the first line of thinking,
   tool calls with a one-line summary of their arguments, and the last 8 lines of tool
   results (red on error). Summaries and new contexts show as rules. `/earlier` loads
-  older entries.
+  older entries. A gap left by a long outage fills itself.
 - **Live state:** the streaming answer, running tools with the last 6 lines of output,
   retries, compactions, queued input, and why a run failed.
 - **The status line:** working or ready, model, thinking level, tokens, `#number`,
@@ -76,10 +76,19 @@ In the order Will chose (below).
     a view nothing updated any more; the daemon now opens the target first.
   - With no `error` listener after connecting, a socket error would have thrown out of
     the client.
-- **Gaps.** After a long outage, or a client too slow for the view's window, the
-  transcript holds a gap ("… some messages aren't loaded"), and nothing fills it:
-  `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
-  seen in the runs by hand, whose outages missed fewer entries than the window holds.
+- **Gaps: done** (2026-11-16). After a long outage, or a client too slow for the view's
+  window (100 entries), the transcript holds a gap; the client now fills it at once,
+  page by page (`AttachedConversation.fillGaps()`, from the terminal client whenever a
+  view with a gap arrives, and again on reconnecting), showing "… loading the messages
+  missed" meanwhile. Found on the way, and fixed: the `entries` request dropped
+  Durable's `next` cursor, and `ConversationTranscript` takes a page without one to
+  mean there's nothing more. So `/earlier` loaded one page and then took it for the
+  conversation's start, and a gap would have been closed after one page, losing the
+  rest. `entries` now returns `next`; protocol version 3. Tested offline
+  (`test/daemon.test.ts`, both failing with the cursor dropped). By hand in tmux the
+  same day, with a faux model, not Claude (a gap takes over 100 entries while away): 70
+  turns ran on the same storage while the client was away; on reconnecting, all 70
+  appeared, once each, in order, and no marker was left.
 - **Long transcripts: measured, fine fullscreen** (2026-11-16,
   `node --expose-gc experiments/transcript/bench.ts`). Each update from the daemon
   refills the transcript (`fillTranscript`, reusing stored entries' components, which

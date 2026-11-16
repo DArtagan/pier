@@ -390,7 +390,7 @@ class Connection {
 			case "entries": {
 				const { limit, ...query } = request.params;
 				const page = await this.#conversation().entries(query, Math.min(limit, 500), undefined, context);
-				return { entries: [...page.items] };
+				return { entries: [...page.items], ...(page.next === undefined ? {} : { next: page.next }) };
 			}
 		}
 	}

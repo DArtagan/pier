@@ -124,9 +124,26 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
 	};
+	// A gap opens when the daemon's window moved on without this client (a long outage, or a
+	// client too slow for it): load what's missing at once. A fill the connection cut short
+	// starts again with the view reconnecting brings.
+	let filling = false;
+	const fillGaps = () => {
+		if (filling || !client.connected || !view?.items.some((item) => item.kind === "gap")) return;
+		filling = true;
+		void conversation
+			.fillGaps(BACKGROUND_CONTEXT)
+			.catch((error: unknown) => {
+				if (client.connected) notify(red(`can't load the missed messages: ${errorText(error)}`));
+			})
+			.finally(() => {
+				filling = false;
+			});
+	};
 	conversation.subscribe((next) => {
 		view = next;
 		render();
+		fillGaps();
 	});
 
 	const attach = async (target: AttachTarget) => {
@@ -182,6 +199,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			watchConnection(client);
 			notify(dim(`reconnected to #${conversation.number}`));
 			render();
+			// The view can arrive before `client` is the new connection, which `fillGaps` waits for.
+			fillGaps();
 		})()
 			.catch((error: unknown) => {
 				if (left.signal.aborted) return;
@@ -379,7 +398,7 @@ export function fillTranscript(
 	transcript.clear();
 	for (const item of view.items) {
 		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
-		else if (item.kind === "gap") transcript.addChild(new Text(dim("… some messages aren't loaded"), 1, 0));
+		else if (item.kind === "gap") transcript.addChild(new Text(dim("… loading the messages missed"), 1, 0));
 		else {
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
