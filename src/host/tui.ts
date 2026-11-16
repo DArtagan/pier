@@ -23,8 +23,8 @@ import {
 	Text,
 	TuiMainScreen,
 } from "@earendil-works/pi-tui";
-import { AttachedConversation, PierClient } from "./client.ts";
-import type { AttachTarget, ConversationSummary } from "./protocol.ts";
+import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
+import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
 const dim = sgr(2, 22);
@@ -50,8 +50,11 @@ export interface TuiOptions {
 
 /** Run the client until the user leaves; resolves with the exit code. */
 export async function runTui(options: TuiOptions): Promise<number> {
-	const client = await PierClient.connect(options.socketPath);
+	// Replaced when the connection drops and comes back (`reconnect`, below).
+	let client = await PierClient.connect(options.socketPath);
 	const conversation = new AttachedConversation(client);
+	// Aborted when the user leaves, which stops reconnecting.
+	const left = new AbortController();
 	initTheme();
 	const markdownTheme = getMarkdownTheme();
 
@@ -80,6 +83,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	};
 	const live = () => (view?.docs["pi.live"] ?? {}) as LiveState;
 	const busy = () => live().run !== undefined;
+	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
 
 	const render = () => {
 		if (view === undefined) return;
@@ -99,7 +103,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		for (const component of renderLive(live(), view.docs["pi.inbox"] as InboxState | undefined, markdownTheme)) {
 			transcript.addChild(component);
 		}
-		status.setText(statusLine(view, conversation.number));
+		status.setText(statusLine(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
 	};
@@ -109,20 +113,78 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	});
 
 	const attach = async (target: AttachTarget) => {
-		rendered.clear();
-		transcript.clear();
+		const before = conversation.id;
+		// Cleared only once it worked, so a failed /resume leaves the transcript as it was.
 		const { created } = await conversation.attach(target, options.cwd, options.env);
+		// Entry ids are unique across conversations, so this only frees the old one's.
+		if (conversation.id !== before) rendered.clear();
 		// The view can arrive before the reply that carries the number.
 		render();
 		notify(dim(`${created ? "new conversation" : "conversation"} #${conversation.number} in ${options.cwd}`));
 	};
 
 	const submit = async (text: string, whenBusy: "steer" | "followUp") => {
+		if (!client.connected) {
+			// Keep it for when the daemon is back, unless something else was typed since.
+			if (editor.getText() === "") editor.setText(text);
+			notify(yellow("not connected to the daemon yet; send it again once it's back"));
+			return;
+		}
 		try {
 			await client.request("submit", { text, whenBusy });
 		} catch (error) {
-			notify(red(String(error instanceof Error ? error.message : error)));
+			notify(red(errorText(error)));
 		}
+	};
+
+	/**
+	 * The connection dropped (the daemon restarted), or the daemon stopped sending the view:
+	 * connect again and resume the transcript where it left off. Gives up only when the
+	 * daemon refuses, as one of another protocol version does after an upgrade.
+	 */
+	let recovering = false;
+	const recover = (why: string) => {
+		if (left.signal.aborted || recovering) return;
+		recovering = true;
+		void (async () => {
+			notify(yellow(`${why}; reconnecting… Ctrl+C leaves`));
+			render();
+			for (;;) {
+				const next = client.connected ? client : await connectWhenUp(options.socketPath, { signal: left.signal });
+				try {
+					await conversation.reattach(next, options.cwd, options.env);
+					client = next;
+					break;
+				} catch (error) {
+					// The daemon refused it (the conversation is gone): reconnecting won't help.
+					if (error instanceof DaemonError) throw error;
+					// Dropped again mid-attach, as when the daemon was still closing.
+					next.close();
+				}
+			}
+			watchConnection(client);
+			notify(dim(`reconnected to #${conversation.number}`));
+			render();
+		})()
+			.catch((error: unknown) => {
+				if (left.signal.aborted) return;
+				notify(red(`can't reconnect: ${errorText(error)}`));
+				leaving?.(1);
+			})
+			.finally(() => {
+				recovering = false;
+			});
+	};
+	const watchConnection = (watched: PierClient) => {
+		void watched.closed.then(() => {
+			if (watched === client) recover("lost the daemon");
+		});
+		watched.onEvent((event) => {
+			// "the daemon is closing" is followed by the connection closing, which `closed` sees.
+			if (watched === client && event.event === "ended" && event.reason !== DAEMON_CLOSING) {
+				recover(`the view stopped (${event.reason})`);
+			}
+		});
 	};
 
 	const command = async (line: string) => {
@@ -187,7 +249,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		editor.addToHistory(trimmed);
 		editor.setText("");
 		const action = trimmed.startsWith("/") ? command(trimmed) : submit(trimmed, "steer");
-		void action.catch((error: unknown) => notify(red(String(error instanceof Error ? error.message : error))));
+		void action.catch((error: unknown) => notify(red(errorText(error))));
 	};
 	tui.addInputListener((data) => {
 		if (matchesKey(data, "alt+enter") || matchesKey(data, "ctrl+shift+enter")) {
@@ -214,19 +276,17 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const done = new Promise<number>((resolve) => {
 		leaving = resolve;
 	});
-	void client.closed.then(() => {
-		notify(red("the daemon closed the connection"));
-		leaving?.(1);
-	});
 	tui.start();
 	try {
 		await attach(options.target);
+		watchConnection(client);
 		notify(dim("/help lists the keys and commands"));
 	} catch (error) {
-		notify(red(String(error instanceof Error ? error.message : error)));
+		notify(red(errorText(error)));
 		leaving?.(1);
 	}
 	const code = await done;
+	left.abort();
 	tui.stop();
 	client.close();
 	return code;
@@ -304,7 +364,7 @@ export function summaryLine(summary: ConversationSummary, withDirectory: boolean
 	return `${bold(`#${summary.number}`)}  ${summary.title ?? dim("(empty)")}${dim(`${summary.busy ? "  working" : ""}${where}`)}`;
 }
 
-function statusLine(view: TranscriptView, number: number | undefined): string {
+function statusLine(view: TranscriptView, number: number | undefined, connected: boolean): string {
 	const agent = (view.docs["pi.agent"] ?? {}) as AgentState;
 	const usage = (view.docs["pi.usage"] ?? { models: {} }) as UsageState;
 	let tokens = 0;
@@ -314,7 +374,7 @@ function statusLine(view: TranscriptView, number: number | undefined): string {
 	const model = agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "default model";
 	return dim(
 		[
-			working ? yellow("working… Esc stops") : "ready",
+			!connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready",
 			model,
 			`thinking ${agent.thinkingLevel ?? "default"}`,
 			`${Math.round(tokens / 1000)}k tokens`,

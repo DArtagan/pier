@@ -93,3 +93,6 @@ export type Event =
 	| { event: "ended"; conversation: ConversationId; reason: string };
 
 export type ServerMessage = Response | Event;
+
+/** The reason of the `ended` event a daemon sends as it closes, just before it closes the connection. */
+export const DAEMON_CLOSING = "the daemon is closing";

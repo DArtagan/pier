@@ -23,7 +23,8 @@ In this repo, `npm run pier -- <args>`, or `node src/host/cli.ts`; the package (
 builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
-the run carries on. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
+the run carries on. When the daemon restarts, the client reconnects and carries on
+where it left off. Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
 one conversation. Each
 conversation's tools run in its directory, with the environment of the last pane that
 attached to it.

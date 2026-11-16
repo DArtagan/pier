@@ -1,7 +1,8 @@
 // The daemon and its clients, over a real Unix socket, with a faux model in place of
-// Claude: attach, submit, watch, several clients, the client's environment, abort, and
-// a restart.
-import { mkdtemp, rm } from "node:fs/promises";
+// Claude: attach, submit, watch, several clients, the client's environment, abort, a
+// restart, and reconnecting after one.
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -22,7 +23,8 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AttachedConversation, PierClient } from "../src/host/client.ts";
+import { WebSocketServer } from "ws";
+import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "../src/host/client.ts";
 import { type Daemon, startDaemon } from "../src/host/daemon.ts";
 import { createPrompt } from "../src/layer/prompt.ts";
 
@@ -206,6 +208,77 @@ describe("daemon", () => {
 		await again.conversation.attach({ kind: "continue" }, dir, {});
 		expect(again.conversation.id).toBe(id);
 		await until(again.conversation, answered("remembered"));
+	});
+
+	it("reattaches after the daemon restarts, getting what it missed without a gap", async () => {
+		await start([fauxAssistantMessage("before the restart")]);
+		const first = await client();
+		await first.conversation.attach({ kind: "new" }, dir, {});
+		const id = first.conversation.id;
+		if (id === undefined) throw new Error("attached without an id");
+		await first.client.request("submit", { text: "one" });
+		await until(first.conversation, answered("before the restart"));
+		await daemon?.close();
+		await first.client.closed;
+		// Rejected at once: ws drops a send on a closed socket, so it would otherwise never settle.
+		await expect(first.client.request("list", {})).rejects.toThrow(/Not connected/);
+
+		// Retrying from before the new daemon is there.
+		const reconnecting = connectWhenUp(socketPath, { firstDelayMs: 10, maxDelayMs: 50 });
+		await start([fauxAssistantMessage("while it was away")]);
+		const other = await client();
+		await other.conversation.attach({ kind: "id", id }, dir, {});
+		await other.client.request("submit", { text: "two" });
+		await until(other.conversation, answered("while it was away"));
+
+		const next = await reconnecting;
+		clients.push(next);
+		await first.conversation.reattach(next, dir, {});
+		const view = await until(first.conversation, answered("while it was away"));
+		expect(view.items.map((item) => item.kind)).not.toContain("gap");
+		const ids = entries(view).map((entry) => entry.id);
+		expect(new Set(ids).size).toBe(ids.length);
+		expect(answered("before the restart")(view)).toBe(true);
+		// Requests go over the new connection.
+		await next.request("submit", { text: "three" });
+		await until(first.conversation, (latest) => answered("three")(latest));
+	});
+
+	it("stays attached when attaching to a conversation that isn't there", async () => {
+		await start([fauxAssistantMessage("still attached")]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		const id = conversation.id;
+		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(DaemonError);
+		expect(conversation.id).toBe(id);
+		await connected.request("submit", { text: "are you there" });
+		await until(conversation, answered("still attached"));
+	});
+
+	it("stops reconnecting when told to, or when a daemon refuses", async () => {
+		const stop = new AbortController();
+		const waiting = connectWhenUp(socketPath, { signal: stop.signal, firstDelayMs: 10 });
+		setTimeout(() => stop.abort(), 50);
+		await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+
+		// A daemon of another protocol version answers hello with an error.
+		await mkdir(join(dir, "run"), { recursive: true });
+		const server = createServer();
+		const sockets = new WebSocketServer({ server });
+		sockets.on("connection", (socket) =>
+			socket.on("message", (data) => {
+				const { id } = JSON.parse(data.toString()) as { id: number };
+				socket.send(JSON.stringify({ id, error: { message: "Protocol 2 isn't 3: update pier" } }));
+			}),
+		);
+		await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
+		try {
+			await expect(connectWhenUp(socketPath, { firstDelayMs: 10 })).rejects.toThrow(/update pier/);
+		} finally {
+			for (const socket of sockets.clients) socket.terminate();
+			await new Promise<void>((resolve) => sockets.close(() => resolve()));
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
 	});
 
 	it("refuses a second daemon on the same socket", async () => {
