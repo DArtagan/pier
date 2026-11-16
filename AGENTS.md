@@ -1,7 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository. `CLAUDE.md` is a symlink to it,
-for Claude Code.
+Guidance for coding agents working in this repository.
 
 ## Overview
 
