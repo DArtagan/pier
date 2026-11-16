@@ -27,8 +27,17 @@ TUI for day-to-day use"*, and *"Yes, start a todos/tui.md"*.
 
 ## What's there now (2026-11-16)
 
-`src/host/tui.ts`, about 350 lines on pi-tui's main-screen renderer, with pi's Markdown
-and list themes:
+`src/host/tui.ts`, about 500 lines on pi-tui's renderers, with pi's Markdown and list
+themes:
+
+- **Two modes, as pi has** (landed 2026-11-16). Fullscreen by default: pi-tui's
+  `TuiAltScreen`, set up and laid out as pi's own `createInteractiveTui` and
+  `createChatViewport` do (neither is exported in 1.5.2, so pier copies about 50 lines).
+  It scrolls, searches, selects and copies (pi's `copyToClipboard`), and on leaving
+  prints the transcript into the scrollback, as pi's default
+  `fullscreenExitOutput: "transcript"` does. `--tui-mode regular`, pi's flag, keeps
+  `TuiMainScreen`. User messages carry pi's OSC 133 prompt markers, which fullscreen's
+  Ctrl+Up and Ctrl+Down jump between.
 
 - **The transcript:** user messages, answers as Markdown, the first line of thinking,
   tool calls with a one-line summary of their arguments, and the last 8 lines of tool
@@ -72,11 +81,24 @@ In the order Will chose (below).
   `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
   seen in the runs by hand, whose outages missed fewer entries than the window holds.
 - **Long transcripts.** Every update rebuilds the transcript's component list,
-  reusing cached components for finished entries. Unmeasured past a few hundred
-  entries.
-- **Main screen or alternate screen.** pi-tui has both. The main screen keeps the
-  terminal's scrollback, as now; the alternate screen gives pier its own scrolling and
-  search (`Ctrl+Shift+F`).
+  reusing cached components for finished entries, and fullscreen's scroll view lays out
+  the whole transcript each frame, as pi's does. Unmeasured past a few hundred
+  entries; measure it fullscreen.
+- **Main screen or alternate screen: both, fullscreen by default** (2026-11-16). By
+  hand in tmux with real Claude, the same day: a 60-line answer scrolled with PageUp,
+  Ctrl+Home and Ctrl+End, with the scrollbar and the "Jump to latest message · Ctrl+End"
+  label; Ctrl+Shift+F found its one match; Ctrl+Up jumped to a prompt, and didn't with
+  the OSC 133 markers taken out; Esc stopped a run; the client reconnected across a
+  daemon restart; leaving left all 60 lines in tmux's scrollback; `--tui-mode regular`
+  ran on the main screen, and `--tui-mode alt` was refused. Not tried:
+  - copying a mouse selection inside tmux (pi's `copyToClipboard` uses the native
+    clipboard, and OSC 52 only over SSH or with `PI_CLIPBOARD_OSC52=1`);
+  - opening links by clicking them: pi's `openBrowser` isn't exported, so pier passes
+    no `openUrl`.
+
+  Not done: Will's own `tuiMode`, `fullscreenCopyOnSelect` and
+  `fullscreenWheelScrollLines` from `settings.json` aren't read; pier takes the flag
+  only, with pi's defaults. That belongs with his settings, under pi's habits.
 
 ### Second: rendering
 
@@ -153,6 +175,10 @@ Will reviews this list first, and throws out what he doesn't really use.
 Will, 2026-11-16: *"Robustness, rendering, then pi's habits (the list of which I'll
 review and throw out any of which I don't really use)"*. The candidates above are in
 that order.
+
+Will, 2026-11-16, of the main and alternate screens: *"Yes, let's do both modes but make
+fullscreen the default - using the same flag that pi uses to switch to the simpler
+terminal mode."* His pi's `settings.json` has `"tuiMode": "fullscreen"`.
 
 ## Done when
 

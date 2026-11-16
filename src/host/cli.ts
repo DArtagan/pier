@@ -5,6 +5,7 @@
 //   pier resume <n>      attach to conversation #<n>
 //   pier list [--all]    conversations here (or everywhere), newest first
 //   pier daemon          run the daemon in the foreground
+// The client runs fullscreen; `--tui-mode regular` keeps the terminal's scrollback, as in pi.
 // The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock.
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,12 +16,19 @@ import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../layer/claude-co
 import { PierClient } from "./client.ts";
 import { startDaemon } from "./daemon.ts";
 import { socketPath, stateDir } from "./paths.ts";
-import { runTui } from "./tui.ts";
+import type { AttachTarget } from "./protocol.ts";
+import { runTui, type TuiMode, takeTuiMode } from "./tui.ts";
 
-const USAGE = `usage: pier [new | resume <number> | list [--all] | daemon]`;
+const USAGE = `usage: pier [--tui-mode fullscreen|regular] [new | resume <number> | list [--all] | daemon]`;
 
-async function main(args: string[]): Promise<number> {
-	const [command, ...rest] = args;
+async function main(argv: string[]): Promise<number> {
+	const taken = takeTuiMode(argv);
+	if ("error" in taken) {
+		console.error(`pier: ${taken.error}\n${USAGE}`);
+		return 2;
+	}
+	const [command, ...rest] = taken.rest;
+	const attach = (target: AttachTarget) => attachTui(target, taken.mode);
 	switch (command) {
 		case undefined:
 			return attach({ kind: "continue" });
@@ -48,8 +56,8 @@ async function main(args: string[]): Promise<number> {
 	}
 }
 
-async function attach(target: Parameters<typeof runTui>[0]["target"]): Promise<number> {
-	return runTui({ socketPath: await reachable(), target, cwd: process.cwd(), env: environment() });
+async function attachTui(target: AttachTarget, mode: TuiMode): Promise<number> {
+	return runTui({ mode, socketPath: await reachable(), target, cwd: process.cwd(), env: environment() });
 }
 
 async function list(all: boolean): Promise<number> {

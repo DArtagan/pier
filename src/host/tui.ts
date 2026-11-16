@@ -1,8 +1,10 @@
 // The terminal client: a transcript, a status line and an editor, attached to one
 // conversation in the daemon. Deliberately thin; see docs/history.md, "The thin slice".
+// Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
+// terminal's own scrollback, as pi's flag does.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
+import { copyToClipboard, getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentState,
 	EntryId,
@@ -16,12 +18,17 @@ import {
 	type Component,
 	Container,
 	Editor,
+	getKeybindings,
 	Markdown,
 	type MarkdownTheme,
 	matchesKey,
 	ProcessTerminal,
+	ScrollView,
+	type Terminal,
 	Text,
+	TuiAltScreen,
 	TuiMainScreen,
+	VStack,
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
@@ -39,9 +46,35 @@ const HELP = [
 	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty.",
 	"/new  /resume [all | <number>]  /earlier  /compact [instructions]  /thinking <level>",
 	"/detach (leave it running)  /quit (stop it, then leave)  /exit (wait for it, then leave)",
+	"Fullscreen: PageUp/PageDown scroll, Ctrl+Home/Ctrl+End go to the top/bottom, Ctrl+Up/Ctrl+Down jump",
+	"between your messages, Ctrl+Shift+F searches, and a mouse selection is copied. `pier --tui-mode regular`",
+	"keeps the terminal's own scrollback instead.",
 ].join("\n");
 
+/** pi's `tuiMode`: the alternate screen, with its own scrolling and search, or the terminal's own scrollback. */
+export type TuiMode = "fullscreen" | "regular";
+
+/**
+ * Take pi's `--tui-mode <fullscreen | regular>` out of `args`, as pi parses it. Returns
+ * the mode (fullscreen if absent) and the rest of the arguments, or an error.
+ */
+export function takeTuiMode(args: readonly string[]): { mode: TuiMode; rest: string[] } | { error: string } {
+	let mode: TuiMode = "fullscreen";
+	const rest: string[] = [];
+	for (let index = 0; index < args.length; index++) {
+		if (args[index] !== "--tui-mode") {
+			rest.push(args[index] as string);
+			continue;
+		}
+		const value = args[++index];
+		if (value !== "fullscreen" && value !== "regular") return { error: "--tui-mode requires regular or fullscreen" };
+		mode = value;
+	}
+	return { mode, rest };
+}
+
 export interface TuiOptions {
+	mode: TuiMode;
 	socketPath: string;
 	target: AttachTarget;
 	cwd: string;
@@ -59,15 +92,14 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const markdownTheme = getMarkdownTheme();
 
 	const terminal = new ProcessTerminal();
-	const tui = new TuiMainScreen(terminal);
+	const tui = options.mode === "fullscreen" ? fullscreen(terminal) : new TuiMainScreen(terminal);
 	const transcript = new Container();
 	const notices = new Text("", 1, 0);
 	const status = new Text("", 1, 0);
 	const editor = new Editor(tui, { borderColor: dim, selectList: getSelectListTheme() });
-	tui.addChild(transcript);
-	tui.addChild(notices);
-	tui.addChild(status);
-	tui.addChild(editor);
+	const components = [transcript, notices, status, editor];
+	for (const component of components) tui.addChild(component);
+	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices, status], editor));
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
@@ -287,9 +319,66 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	}
 	const code = await done;
 	left.abort();
-	tui.stop();
+	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
+	else tui.stop();
 	client.close();
 	return code;
+}
+
+/** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported in 1.5.2). */
+function fullscreen(terminal: Terminal): TuiAltScreen {
+	const bottom = getKeybindings().getKeys("tui.altScreen.bottom")[0];
+	const shortcut = bottom === undefined ? "" : ` · ${bottom.replace(/(^|\+)([a-z])/g, (all) => all.toUpperCase())}`;
+	return new TuiAltScreen(terminal, undefined, undefined, {
+		scrollToEndIndicator: () => `\x1b[7m ↓ Jump to latest message${shortcut} \x1b[27m`,
+		wheelScrollLines: "auto",
+		copySelection: async (text) => {
+			try {
+				await copyToClipboard(text);
+				return true;
+			} catch (error) {
+				return error instanceof Error ? error.message : String(error);
+			}
+		},
+	});
+}
+
+/**
+ * The transcript scrolling above a dock that keeps the status and the editor in view, as
+ * pi's `createChatViewport` lays them out (not exported in 1.5.2).
+ */
+function chatLayout(transcript: Component, above: readonly Component[], editor: Component): Component {
+	const scrolling = new ScrollView(transcript, {
+		follow: "end",
+		primary: true,
+		overscroll: "chain",
+		scrollbar: "auto",
+	});
+	const dock = new VStack([
+		...above.map((component) => ({ component, shrink: 1, minSize: 0 })),
+		{ component: editor, shrink: 1, minSize: 3 },
+	]);
+	return new VStack([
+		{ component: scrolling, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+		{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+	]);
+}
+
+/**
+ * Leave the alternate screen, and print the transcript into the terminal's scrollback, as
+ * pi does by default (`fullscreenExitOutput: "transcript"`): it hands the same components
+ * to a main-screen renderer, draws them once, and stops it.
+ */
+function leaveFullscreen(tui: TuiAltScreen, components: readonly Component[]): void {
+	tui.stop({ preserveScreen: true });
+	tui.setFocus(null);
+	tui.clear();
+	tui.setLayoutRoot(undefined);
+	const main = new TuiMainScreen(tui.terminal);
+	for (const component of components) main.addChild(component);
+	main.invalidate();
+	main.renderNow();
+	main.stop();
 }
 
 function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
@@ -299,7 +388,7 @@ function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
 	if (message === undefined || message.role === "system") return new Container();
 	if (message.role === "user") {
 		const text = typeof message.content === "string" ? message.content : textParts(message.content);
-		return new Text(`${cyan(bold("›"))} ${text}`, 1, 1);
+		return new PromptZone(new Text(`${cyan(bold("›"))} ${text}`, 1, 1));
 	}
 	if (message.role === "assistant") return renderAssistant(message, markdown);
 	// A tool result: its last lines, as pi shows them collapsed.
@@ -308,6 +397,31 @@ function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
 	const shown = lines.slice(-8).join("\n");
 	const more = lines.length > 8 ? dim(`  … ${lines.length - 8} more lines\n`) : "";
 	return new Text(`${more}${(message.isError ? red : dim)(indent(shown || "(no output)"))}`, 1, 0);
+}
+
+/**
+ * A user message, marked as a prompt with OSC 133 as pi marks its own, so fullscreen's
+ * previous and next prompt keys (and tmux, in regular mode) can jump between them.
+ */
+class PromptZone implements Component {
+	readonly #inner: Component;
+
+	constructor(inner: Component) {
+		this.#inner = inner;
+	}
+
+	render(width: number): string[] {
+		const lines = this.#inner.render(width);
+		if (lines.length === 0) return lines;
+		const marked = [...lines];
+		marked[0] = `\x1b]133;A\x07${marked[0]}`;
+		marked[marked.length - 1] = `\x1b]133;B\x07\x1b]133;C\x07${marked.at(-1)}`;
+		return marked;
+	}
+
+	invalidate(): void {
+		this.#inner.invalidate();
+	}
 }
 
 function renderAssistant(message: AssistantMessage, markdown: MarkdownTheme): Component {

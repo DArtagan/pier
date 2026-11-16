@@ -20,7 +20,7 @@ deep dive in `web.md`, and then it goes.
 What's there, and candidates for making it good for daily use: diffs, pi's own
 components, a footer, `/model`, `!command`, `@file`, keybindings. Each has its facts
 checked or marked unchecked. Will's order (2026-11-16): robustness, rendering, then
-pi's habits, which he'll prune first. Reconnecting landed 2026-11-16.
+pi's habits, which he'll prune first. Reconnecting and fullscreen landed 2026-11-16.
 
 **[web.md](web.md) — a web UI on Elanor, for this machine, the tailnet and the phone**
 Decided by Will on 2026-11-16, as an exception in `docs/principles.md`; deprecated
