@@ -3,7 +3,7 @@
 // Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
 // terminal's own scrollback, as pi's flag does.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
 import { copyToClipboard, getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentState,
@@ -32,18 +32,18 @@ import {
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
+import { installKeybindings, isExpandKey, ToolCalls } from "./tool-calls.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
 const dim = sgr(2, 22);
 const bold = sgr(1, 22);
 const red = sgr(31, 39);
-const green = sgr(32, 39);
 const yellow = sgr(33, 39);
 const cyan = sgr(36, 39);
 
 const HELP = [
 	"Enter sends; while Claude works, it steers. Alt+Enter queues a follow-up instead.",
-	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty.",
+	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty. Ctrl+O expands tools' output.",
 	"/new  /resume [all | <number>]  /earlier  /compact [instructions]  /thinking <level>",
 	"/detach (leave it running)  /quit (stop it, then leave)  /exit (wait for it, then leave)",
 	"Fullscreen: PageUp/PageDown scroll, Ctrl+Home/Ctrl+End go to the top/bottom, Ctrl+Up/Ctrl+Down jump",
@@ -89,6 +89,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	// Aborted when the user leaves, which stops reconnecting.
 	const left = new AbortController();
 	initTheme();
+	installKeybindings();
 	const markdownTheme = getMarkdownTheme();
 
 	const terminal = new ProcessTerminal();
@@ -103,6 +104,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
+	const tools = new ToolCalls(tui, options.cwd);
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
 	let exitWhenIdle = false;
@@ -119,7 +121,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	const render = () => {
 		if (view === undefined) return;
-		fillTranscript(transcript, view, rendered, markdownTheme);
+		fillTranscript(transcript, view, rendered, markdownTheme, tools);
 		status.setText(statusLine(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
@@ -151,7 +153,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		// Cleared only once it worked, so a failed /resume leaves the transcript as it was.
 		const { created } = await conversation.attach(target, options.cwd, options.env);
 		// Entry ids are unique across conversations, so this only frees the old one's.
-		if (conversation.id !== before) rendered.clear();
+		if (conversation.id !== before) {
+			rendered.clear();
+			tools.clear();
+		}
 		// The view can arrive before the reply that carries the number.
 		render();
 		notify(dim(`${created ? "new conversation" : "conversation"} #${conversation.number} in ${options.cwd}`));
@@ -297,6 +302,11 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			}
 			return { consume: true };
 		}
+		if (isExpandKey(data)) {
+			tools.setExpanded(!tools.expanded);
+			tui.requestRender();
+			return { consume: true };
+		}
 		if (matchesKey(data, "escape") && busy()) {
 			void client.request("abort", {}).catch(() => {});
 			return { consume: true };
@@ -323,6 +333,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	}
 	const code = await done;
 	left.abort();
+	// Stops the clocks of calls still running, which would keep the process alive.
+	tools.clear();
 	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
 	else tui.stop();
 	client.close();
@@ -394,27 +406,29 @@ export function fillTranscript(
 	view: TranscriptView,
 	rendered: Map<EntryId, Component>,
 	markdown: MarkdownTheme,
+	tools: ToolCalls,
 ): void {
 	transcript.clear();
+	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	for (const item of view.items) {
 		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
 		else if (item.kind === "gap") transcript.addChild(new Text(dim("… loading the messages missed"), 1, 0));
 		else {
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
-				component = renderEntry(item.entry, markdown);
+				component = renderEntry(item.entry, markdown, tools);
 				rendered.set(item.entry.id, component);
 			}
 			transcript.addChild(component);
 		}
 	}
-	const live = (view.docs["pi.live"] ?? {}) as LiveState;
-	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, markdown)) {
+	tools.follow(live);
+	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, markdown, tools)) {
 		transcript.addChild(component);
 	}
 }
 
-function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
+function renderEntry(entry: EntryRecord, markdown: MarkdownTheme, tools: ToolCalls): Component {
 	const message = entry.model?.[0];
 	if (entry.kind === "pi.compaction") return new Text(dim("── earlier messages were summarized ──"), 1, 1);
 	if (entry.kind === "pi.reset") return new Text(dim("── a new context starts here ──"), 1, 1);
@@ -423,8 +437,35 @@ function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
 		const text = typeof message.content === "string" ? message.content : textParts(message.content);
 		return new PromptZone(new Text(`${cyan(bold("›"))} ${text}`, 1, 1));
 	}
-	if (message.role === "assistant") return renderAssistant(message, markdown);
-	// A tool result: its last lines, as pi shows them collapsed.
+	if (message.role === "assistant") return renderAssistant(message, markdown, tools, true);
+	// A tool result settles its call's component, which draws it. One whose call isn't
+	// loaded (`/earlier` brought the result's page, not the answer's) draws itself until it is.
+	if (tools.result(message)) return new Container();
+	return new OrphanResult(message.toolCallId, tools, toolResultText(message));
+}
+
+/** A tool result whose call isn't loaded: its last lines, until the call's component draws it. */
+class OrphanResult implements Component {
+	readonly #callId: string;
+	readonly #tools: ToolCalls;
+	readonly #text: Text;
+
+	constructor(callId: string, tools: ToolCalls, text: Text) {
+		this.#callId = callId;
+		this.#tools = tools;
+		this.#text = text;
+	}
+
+	render(width: number): string[] {
+		return this.#tools.has(this.#callId) ? [] : this.#text.render(width);
+	}
+
+	invalidate(): void {
+		this.#text.invalidate();
+	}
+}
+
+function toolResultText(message: ToolResultMessage): Text {
 	const output = textParts(message.content).trimEnd();
 	const lines = output.split("\n");
 	const shown = lines.slice(-8).join("\n");
@@ -457,14 +498,27 @@ class PromptZone implements Component {
 	}
 }
 
-function renderAssistant(message: AssistantMessage, markdown: MarkdownTheme): Component {
+/**
+ * An answer: its text as Markdown, the first line of its thinking, and its tool calls
+ * as pi draws them (`ToolCalls`). `stored` is false for the answer still streaming.
+ */
+function renderAssistant(
+	message: AssistantMessage,
+	markdown: MarkdownTheme,
+	tools: ToolCalls,
+	stored: boolean,
+): Component {
 	const container = new Container();
 	for (const part of message.content) {
 		if (part.type === "text" && part.text.trim() !== "") container.addChild(new Markdown(part.text, 1, 1, markdown));
 		else if (part.type === "thinking" && part.thinking.trim() !== "") {
 			container.addChild(new Text(dim(`thinking: ${part.thinking.trim().split("\n")[0]?.slice(0, 120)}`), 1, 0));
 		} else if (part.type === "toolCall") {
-			container.addChild(new Text(`${green("●")} ${bold(part.name)} ${dim(summarizeArgs(part.arguments))}`, 1, 0));
+			const component = tools.call(part, stored);
+			if (component !== undefined) container.addChild(component);
+			if (stored && (message.stopReason === "error" || message.stopReason === "aborted")) {
+				tools.failed(part, message.stopReason === "aborted" ? "Operation aborted" : message.errorMessage || "Error");
+			}
 		}
 	}
 	if (message.stopReason === "error" && message.errorMessage) {
@@ -473,15 +527,21 @@ function renderAssistant(message: AssistantMessage, markdown: MarkdownTheme): Co
 	return container;
 }
 
-function renderLive(live: LiveState, inbox: InboxState | undefined, markdown: MarkdownTheme): Component[] {
+function renderLive(
+	live: LiveState,
+	inbox: InboxState | undefined,
+	markdown: MarkdownTheme,
+	tools: ToolCalls,
+): Component[] {
 	const components: Component[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
-	if (partial !== undefined) components.push(renderAssistant(partial, markdown));
+	if (partial !== undefined) components.push(renderAssistant(partial, markdown, tools, false));
 	if (live.generation?.retry !== undefined) {
 		components.push(new Text(yellow(`retrying: ${live.generation.retry.error}`), 1, 0));
 	}
 	for (const slot of live.tools ?? []) {
-		if (slot.status === "done") continue;
+		// Its call's component shows it, under the answer that made the call.
+		if (slot.status === "done" || tools.has(slot.callId)) continue;
 		const tail = (slot.output ?? "").trimEnd().split("\n").slice(-6).join("\n");
 		components.push(
 			new Text(
@@ -534,14 +594,6 @@ function statusLine(view: TranscriptView, number: number | undefined, connected:
 function textParts(content: readonly { type: string; text?: string }[] | string): string {
 	if (typeof content === "string") return content;
 	return content.map((part) => (part.type === "text" ? (part.text ?? "") : `[${part.type}]`)).join("");
-}
-
-function summarizeArgs(args: unknown): string {
-	if (args === null || typeof args !== "object") return "";
-	const record = args as Record<string, unknown>;
-	const main = record.command ?? record.path ?? record.file_path;
-	const text = typeof main === "string" ? main : JSON.stringify(args);
-	return text.replace(/\s+/g, " ").slice(0, 100);
 }
 
 function indent(text: string): string {

@@ -40,8 +40,8 @@ themes:
   Ctrl+Up and Ctrl+Down jump between.
 
 - **The transcript:** user messages, answers as Markdown, the first line of thinking,
-  tool calls with a one-line summary of their arguments, and the last 8 lines of tool
-  results (red on error). Summaries and new contexts show as rules. `/earlier` loads
+  and tool calls as pi draws them (below; Ctrl+O expands their output). Summaries and
+  new contexts show as rules. `/earlier` loads
   older entries. A gap left by a long outage fills itself.
 - **Live state:** the streaming answer, running tools with the last 6 lines of output,
   retries, compactions, queued input, and why a run failed.
@@ -159,14 +159,42 @@ In the order Will chose (below).
 
 ### Second: rendering
 
-- **Edits as diffs.** pi exports `renderDiff(diffText, options)`. Unchecked: whether
-  Durable's `edit` tool leaves a diff in its result's `details`, or pier has to compute
-  one from the arguments.
-- **Tool calls as pi draws them.** pi exports `ToolExecutionComponent(toolName,
-  toolCallId, args, options, toolDefinition, ui, cwd)`. Its renderers for pi's own
-  tools (`createAllToolRenderers`) are not exported in 1.5.2, and Durable's tools
-  aren't pi's tool definitions. Unchecked: how it draws a call with no definition.
-  The fallback is pier's own small renderers per tool (bash, read, write, edit).
+- **Tool calls as pi draws them, edits as diffs: done** (2026-11-16,
+  `src/host/tool-calls.ts`). Each call is pi's `ToolExecutionComponent`, with the
+  renderers of the tool definitions pi exports (`createBashToolDefinition` and the rest
+  for bash, read, write and edit; `createAllToolRenderers` isn't exported in 1.5.2).
+  Other tools get pi's fallback: name, arguments as JSON, output. Checked first:
+  - Durable's `edit` stores `details.diff` in the format pi's edit renderer reads, so
+    an edit shows as pi's diff with nothing computed.
+  - Why Durable has tools of its own, and what p3 means to do (asked by Will): Durable
+    doesn't depend on pi-coding-agent or pi-agent-core, and its tools are durable
+    tasks that run through pi-env, with three result channels, so pi's tool definitions
+    don't fit it. p3's `coding-tools` plugin (slice 8, unbriefed) has p2's as
+    precedent: Durable's tools, drawn by a copy of pi's renderers
+    (`apps/p2/plugins/coding-tools/cards.ts`), edit showing the stored diff. pier
+    imports the renderers instead of copying them (Will, 2026-11-16: *"Yes please,
+    carry on in that way"*).
+
+  As in pi, one component per call: the stored answer places it, the running slot in
+  `pi.live` streams its output (with pi's "Elapsed" clock), and the stored result
+  settles it. Calls are never marked `setArgsComplete`, so an edit's renderer doesn't
+  read the file to preview a diff the result already has. Ctrl+O expands and
+  collapses every call (pi's `app.tools.expand`, added to pi-tui's keymap, since pi's
+  app keymap isn't exported; it's what the renderers' "ctrl+o to expand" hints name).
+
+  Found on the way: pi's renderers tick a 1 s `setInterval` while a call runs, cleared
+  only by a final result. A call whose slot goes without one (aborted, faulted, another
+  conversation) would tick forever and keep the process alive, so `ToolCalls` settles
+  those, and all of them on leaving; tests fail without either. Gaps against pi's
+  details: Durable's bash keeps truncation and the full output's path in
+  `structuredOutput`, which isn't stored, so pi's "full output at …" line never shows.
+
+  By hand in tmux with real Claude, the same day: `seq 1 40` collapsed to its last 5
+  lines with "35 earlier lines, ctrl+o to expand"; read showed its header only, as pi's
+  collapsed read does; an edit showed pi's diff; Ctrl+O expanded all three; a 20 s
+  loop streamed under its call with "Elapsed 12.0s", and after Esc showed "Took 16.3s"
+  and stayed still; leaving returned to the shell at once; reattaching drew the same.
+  Benchmark rerun: fullscreen frames at 10,000 entries rose from 1.2 to 4.3 ms p50.
 - **Answers and thinking as pi draws them:** `AssistantMessageComponent(message,
   hideThinkingBlock, markdownTheme, …)` takes a pi-ai message, which is what Durable
   stores. Probably a drop-in; it would also give a show/hide toggle for thinking.
