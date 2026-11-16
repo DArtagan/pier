@@ -90,11 +90,34 @@ In the order Will chose (below).
   label; Ctrl+Shift+F found its one match; Ctrl+Up jumped to a prompt, and didn't with
   the OSC 133 markers taken out; Esc stopped a run; the client reconnected across a
   daemon restart; leaving left all 60 lines in tmux's scrollback; `--tui-mode regular`
-  ran on the main screen, and `--tui-mode alt` was refused. Not tried:
-  - copying a mouse selection inside tmux (pi's `copyToClipboard` uses the native
-    clipboard, and OSC 52 only over SSH or with `PI_CLIPBOARD_OSC52=1`);
-  - opening links by clicking them: pi's `openBrowser` isn't exported, so pier passes
-    no `openUrl`.
+  ran on the main screen, and `--tui-mode alt` was refused.
+
+  **Mouse selection**, the same day, with SGR mouse events sent into the pane as tmux
+  passes Alacritty's on (`tmux send-keys -l $'\e[<0;6;6M'` …): a drag copied
+  `quick brown`, a double-click `fox`, and a triple-click the whole line (with pier's
+  one-column margin, as pi's would). Copies go through pi's `copyToClipboard`, which on
+  this desktop runs `wl-copy`; read back with `wl-paste`. Not tried with a real mouse,
+  which tmux (`mouse on`) passes on the same way.
+
+  **Links: proposed to need nothing from pier.** Will opens links in pi with
+  Shift+click. That is, by his config rather than by watching it, Alacritty's own URL
+  hint: Alacritty 0.17's default, as his `alacritty.toml` sets no `hints`, and Shift
+  bypasses an app's mouse capture. It matches the URL in the visible text. pi-tui prints
+  a link's URL as text whenever it doesn't emit OSC 8 hyperlinks, which it doesn't under
+  his tmux (`client_termfeatures` lacks `hyperlinks`), so pier shows `the docs
+  (https://…)` as pi does (seen 2026-11-16). Clicking without Shift would need OSC 8
+  through tmux (`terminal-features ',alacritty*:hyperlinks'`) and an opener of pier's
+  own, since pi's `openBrowser` isn't exported. Will asked (2026-11-16): *"Is it tidier
+  to enable hyperlink support in alacritty, than it is mucking with pi openBrowser?"*
+  Claude's proposal, not yet agreed: rely on Alacritty's hint, and pass no `openUrl`.
+  Unchecked: whether a URL that pi-tui wraps onto a second line still matches the hint.
+
+  **Copying over SSH doesn't reach the phone or laptop, in pi either.** In a session
+  over SSH, `copyToClipboard` sends OSC 52 for the client's terminal, but Will's tmux
+  has `set-clipboard external`, which ignores OSC 52 from applications: an OSC 52
+  printed in a pane made no tmux buffer and didn't reach the clipboard (checked
+  2026-11-16). `set -g set-clipboard on` in his tmux config (dotfiles) would pass it
+  on; his decision.
 
   Not done: Will's own `tuiMode`, `fullscreenCopyOnSelect` and
   `fullscreenWheelScrollLines` from `settings.json` aren't read; pier takes the flag
