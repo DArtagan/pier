@@ -20,19 +20,19 @@ packaging in dotfiles' `todos/pi-durable.md`. The rest waits on Earendil's Pi Ro
 **[wire-format.md](wire-format.md) — wire format and transport: remote access still open**
 The option space for the protocol and for reaching the daemon (Unix socket, SSH,
 loopback, tailnet, a tunnel), with Earendil's p2 as prior art. The local part was
-settled for the thin slice on 2026-11-13; it stays as the reference for a web or
-phone client.
+settled for the thin slice on 2026-11-13. Its remote-access options feed the sign-in
+deep dive in `web.md`, and then it goes.
 
 **[tui.md](tui.md) — the terminal client, for daily use**
 What's there, and candidates for making it good for daily use: diffs, pi's own
 components, a footer, `/model`, `!command`, `@file`, keybindings, reconnecting. Each
-has its facts checked or marked unchecked. Waiting on Will to rank them.
+has its facts checked or marked unchecked. Will's order (2026-11-16): robustness,
+rendering, then pi's habits, which he'll prune first.
 
-**[web.md](web.md) — a web UI: findings, and a decision for Will**
-Elanor's licensing and releases (public and licensed; the preview registry needs a
-staff login), what p3 and p2 have, what a pier web UI would take (a TCP listener,
-sign-in, a build step, the phone over the tailnet), and the principle it would need an
-exception to. Five questions, waiting on Will; not deferred to December.
+**[web.md](web.md) — a web UI on Elanor, for this machine, the tailnet and the phone**
+Decided by Will on 2026-11-16, as an exception in `docs/principles.md`; deprecated
+once p3's web UI covers the same ground. Findings on Elanor, p3 and p2, then a plan
+that starts with a deep dive into sign-in.
 
 ## Writing a spec
 

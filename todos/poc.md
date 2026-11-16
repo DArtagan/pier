@@ -44,7 +44,9 @@ read-only clone of each at its tag). The gate passed again; what changed is mark
 Will, 2026-11-13: *"Let's build the very thin slice."* That was Claude's proposal of the
 same day: while Earendil's p3 takes shape, build only what makes pier useful in tmux
 panes on one host, so that its parts carry over to p3 if it becomes the way. Not built:
-anything p3 is centred on (sign-in, remote access, a web UI, a plugin system).
+anything p3 is centred on (sign-in, remote access, a web UI, a plugin system). On
+2026-11-16 Will made a web UI, with the sign-in and tailnet access it needs, an
+exception (`docs/principles.md`, section 1; `todos/web.md`).
 
 ### What's built
 

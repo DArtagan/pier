@@ -3,8 +3,8 @@
 ## Opening prompt
 
 > Read `docs/vision.md`, `docs/principles.md`, then `todos/tui.md`. Work through the
-> candidates in the order Will chose (under "Decided"); if he hasn't chosen, ask him
-> which bother him most in daily use before building. For each: check the facts marked
+> candidates in the order Will chose (under "Decided"): robustness, then rendering,
+> then pi's habits, which he reviews first and prunes. For each: check the facts marked
 > "unchecked" first, keep it in `src/host/`, prefer pi's exported components over
 > pier's own, test what can be tested offline, and try it by hand in tmux with real
 > Claude. Update this spec as items land, and delete it when it's done.
@@ -48,9 +48,21 @@ and list themes:
 
 ## Candidates
 
-Not in any order: Will ranks them (below).
+In the order Will chose (below).
 
-### Rendering
+### First: robustness
+
+- **Reconnect after a daemon restart.** `AttachedConversation` can already resume a
+  transcript (`ConversationTranscript.resume`); the TUI exits instead of retrying.
+  This matters once the daemon runs as a service that restarts.
+- **Long transcripts.** Every update rebuilds the transcript's component list,
+  reusing cached components for finished entries. Unmeasured past a few hundred
+  entries.
+- **Main screen or alternate screen.** pi-tui has both. The main screen keeps the
+  terminal's scrollback, as now; the alternate screen gives pier its own scrolling and
+  search (`Ctrl+Shift+F`).
+
+### Second: rendering
 
 - **Edits as diffs.** pi exports `renderDiff(diffText, options)`. Unchecked: whether
   Durable's `edit` tool leaves a diff in its result's `details`, or pier has to compute
@@ -73,7 +85,9 @@ Not in any order: Will ranks them (below).
   pi-claude-code passes the plan windows on, in its `claude-code.rate-limit`
   diagnostic on each answer.
 
-### pi's habits
+### Third: pi's habits
+
+Will reviews this list first, and throws out what he doesn't really use.
 
 - **Will's keybindings and theme** from `~/.pi/agent/keybindings.json` and
   `settings.json`; his keybindings remap follow-up to Ctrl+Shift+Enter and Alt+Enter.
@@ -98,18 +112,6 @@ Not in any order: Will ranks them (below).
   (`conversation.fork(entryId)`). pi's `TreeSelectorComponent` expects pi's session
   tree. This needs a protocol request and a way to pick the entry.
 
-### Robustness
-
-- **Reconnect after a daemon restart.** `AttachedConversation` can already resume a
-  transcript (`ConversationTranscript.resume`); the TUI exits instead of retrying.
-  This matters once the daemon runs as a service that restarts.
-- **Long transcripts.** Every update rebuilds the transcript's component list,
-  reusing cached components for finished entries. Unmeasured past a few hundred
-  entries.
-- **Main screen or alternate screen.** pi-tui has both. The main screen keeps the
-  terminal's scrollback, as now; the alternate screen gives pier its own scrolling and
-  search (`Ctrl+Shift+F`).
-
 ## How to check
 
 - **Offline tests** for anything with logic outside drawing: protocol requests, the
@@ -122,8 +124,9 @@ Not in any order: Will ranks them (below).
 
 ## Decided
 
-Nothing yet. Will to choose which candidates come first, from what bothers him in
-daily use.
+Will, 2026-11-16: *"Robustness, rendering, then pi's habits (the list of which I'll
+review and throw out any of which I don't really use)"*. The candidates above are in
+that order.
 
 ## Done when
 

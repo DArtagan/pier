@@ -16,8 +16,21 @@ these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
   environments, and perhaps orchestrate them. Earendil's p3, "Pi Roam", is designing
   exactly that.
 - **Build the very thin slice** (Will, 2026-11-13). Build only what daily use asks
-  for. Don't build what p3 is centred on: sign-in, remote access, a web UI, a plugin
-  system, several users.
+  for. Don't build what p3 is centred on (a plugin system, several users, Radius,
+  public exposure) unless Will decides an exception, recorded here with its reason and
+  limits.
+- **Exception: a web UI** (Will, 2026-11-16: *"we do want to build it as what the
+  future Earendil will be making is unclear and I'd like it sooner"*).
+  - It's built on Elanor.
+  - It's reachable on this machine and over the tailnet, and the phone is
+    first-class (*"by phone is very important"*).
+  - It brings the sign-in it needs, chosen after a deep dive into the options
+    (`todos/web.md`).
+  - It doesn't bring several users, public exposure or Radius.
+- **What Earendil covers, pier gives up.** When Earendil ships something that covers
+  most of the same ground as a part of pier (p3's web UI, its terminal client, its
+  sessions), deprecate pier's part and remove it, keeping pier as thin as possible
+  (Will, 2026-11-16, of the web UI).
 - **Ask of every addition:** is it needed for daily use now? And will it carry over
   to p3, or be cheap to throw away? If neither, it waits.
 - **Prefer less pier.** When an upstream piece does the job, use it and delete pier's
@@ -36,8 +49,9 @@ these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
   which p3 calls "a catalogue of what users wanted, not a model".
 - **Clients render Durable's own view:** state, not events. The protocol is an
   envelope around it, and the transport a thin adapter under it.
-- **Expect to throw away** the daemon, the socket, the envelope, the CLI and the SQLite
-  file. Treat conversations as disposable; moving them to p3 would take a conversion.
+- **Expect to throw away** the daemon, the socket, the envelope, the CLI, the terminal
+  client, the web UI and the SQLite file. Treat conversations as disposable; moving
+  them to p3 would take a conversion.
 
 ## 3. Upstream first, and current
 
@@ -68,12 +82,14 @@ these rest on are in `CLAUDE.md`; the history behind them is in `todos/poc.md`.
 
 - **Local first.**
   - Data lives in one SQLite file on the host, which Will backs up.
-  - Other hosts are reached over SSH, and later the tailnet.
+  - Other hosts and the phone reach pier over SSH and the tailnet.
   - No hosted service sits in the path: not Radius, which Pi Roam leans on for remote
     access, backups and sign-in.
   - Claude comes through Claude Code, on Will's subscription.
 - **One daemon per host, one storage.**
-  - It listens on a Unix socket, guarded by file permissions, and nothing on a network.
+  - Terminal clients connect over a Unix socket, guarded by file permissions.
+  - The web UI's listener is on loopback and the tailnet only, never a public
+    interface, and nothing is reachable there without signing in.
   - Its socket and state directories are private.
   - Each conversation's tools run with the environment of the pane that last attached
     (Will, 2026-10-29: pass the whole environment, refine later).

@@ -3,9 +3,11 @@
 ## Opening prompt
 
 > Read `todos/wire-format.md`. The local protocol is built (see "Decided" and
-> `todos/poc.md`, "The thin slice"). What's left here is remote access: a web or
-> phone client, and how it signs in. Check `apps/p3/docs/` on pi's `main` first; p3
-> may settle it. Then put the options to Will.
+> `todos/poc.md`, "The thin slice"). Remote access is decided in outline (Will,
+> 2026-11-16: a web UI, locally and on the tailnet, phone first; see `todos/web.md`).
+> What's left is how it signs in, which is step 1 of `todos/web.md`. Use the option
+> space below for that deep dive, then fold what's still useful into `todos/web.md`
+> and delete this file.
 
 **Interim spec**, written 2026-10-29 for Will to read and decide on, and **revised
 2026-11-12** against pi 1.5.2. Questions 1–4 were settled for the thin slice on

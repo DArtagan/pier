@@ -1,12 +1,12 @@
-# A web UI: findings, and a decision for Will
+# A web UI on Elanor, for this machine, the tailnet and the phone
 
 ## Opening prompt
 
-> Read `docs/vision.md`, `docs/principles.md`, then `todos/web.md`. If Will has
-> answered the questions at the end (under "Decided"), carry out his choice: amend
-> `docs/principles.md` as he decided, and turn this file into the build spec, or delete
-> it. If he hasn't, re-check the facts marked with dates (Elanor's releases, p3's
-> slice 16) and put the questions to him.
+> Read `docs/vision.md`, `docs/principles.md`, then `todos/web.md`. Build the web UI
+> in the steps under "Plan". Re-check Elanor's latest release first and pin it. Do
+> step 1, the deep dive into sign-in, and put its options to Will before anything
+> listens beyond loopback. Keep it to the scope below and keep it thin; it's
+> deprecated once p3's web UI covers the same ground. Update this spec as steps land.
 
 Written 2026-11-16. Will's words that day: *"I'm interested in starting to improve the
 TUI for day-to-day use and eventually build a web UI"*. Asked whether to decide the web
@@ -14,13 +14,24 @@ UI at the early-December check of p3: *"No, I don't want to hold off deciding un
 December. Write the web ui related findings to a `web.md` todo spec."* So this is
 decided soon, not in December.
 
-## It needs a decision against a principle
+## Decided
 
-`docs/principles.md`, section 1: *"Don't build what p3 is centred on: sign-in, remote
-access, a web UI, a plugin system, several users."* A web UI is p3's slice 16. A web
-UI reached from the phone also brings sign-in and remote access with it. Building one
-in pier means Will deciding to make an exception, recorded in the principles with its
-reason and its limits. Until he does, the principle stands.
+Will, 2026-11-16, answering this spec's questions:
+
+- **Build it now:** *"Yes we do want to build it as what the future Earendil will be
+  making is unclear and I'd like it sooner. If what Earendil builds covers most of the
+  same ground as what we make in pier, then we'll deprecate the web ui parts of pier
+  accordingly - keeping is as thin as possible. Rewrite the principles
+  accordingly."* Done: `docs/principles.md`, section 1, "Exception: a web UI" and
+  "What Earendil covers, pier gives up".
+- **Elanor:** *"Let's use Elanor to start."*
+- **Where:** *"It will be accessible locally and on the tailnet (by phone is very
+  important)."*
+- **Sign-in:** *"let's do a deep dive on the options when we get there."* That's step 1
+  of the plan.
+
+Until 2026-11-16, `docs/principles.md` ruled a web UI out (*"Don't build what p3 is
+  centred on: sign-in, remote access, a web UI, …"*).
 
 ## Findings
 
@@ -88,38 +99,37 @@ reason and its limits. Until he does, the principle stands.
   - a composer with send, steer and follow-up, and stop;
   - a layout that works on a phone.
 
-## Options
+## Plan
 
-1. **Don't build one.** Use p3's web UI when it ships, with Will's layer as p3
-   plugins; meanwhile use classic pi on the web through pi-web. No new code, and no
-   exception to the principles. The cost is no web or phone access to pier
-   conversations until p3's slice 16, whose timing is unknown.
-2. **A small pier web UI on Elanor.** It looks like p3, with less to build (components,
-   tokens, fonts). The cost: a young dependency that changes, pinned exactly, and
-   releases that lag Earendil's own.
-3. **A small pier web UI without Elanor:** plain React, or no framework, with a few
-   styles. Fewer dependencies, and it's clearly throwaway; it looks like neither pi nor
-   p3.
+The scope is the minimal one above: the conversations, a transcript with streaming and
+tool output, a composer with send, steer, follow-up and stop, and a layout made for the
+phone first. One owner; nothing for several users, nothing public, no Radius.
 
-For 2 or 3, also decide what it reaches:
+1. **Sign-in, a deep dive** (Will: *"when we get there"*), before anything listens
+   beyond loopback. Compare the options against Will's setup:
+   - a token in a private file;
+   - a pairing code approved from a terminal, as p3 chose on 2026-11-16;
+   - the tailnet's identity (ACLs, and whether `tailscale serve`'s identity headers
+     work without HTTPS on headscale);
+   - cookies and their lifetime on a phone;
+   - Host and Origin checks, and DNS rebinding.
 
-- this machine only (loopback);
-- the tailnet, including the phone.
+   Use `todos/wire-format.md`'s transport table and p3's slice 25 ("Decided since")
+   as starting points. Put the options to Will; record his choice here.
+2. **A build step and a listener on loopback.** Bundle the page with esbuild; the
+   daemon serves it, and the protocol over WebSocket, on a loopback TCP port. Make the
+   browser client from `src/host/client.ts`, and check that Durable's and Chord's
+   client pieces really bundle for a browser.
+3. **The UI on Elanor,** phone first: the conversations, the transcript, the composer.
+   Pin Elanor's packages exactly.
+4. **The tailnet,** with the sign-in Will chose: listen on the tailnet interface too,
+   never a public one. Try it on the phone.
+5. **Packaging:** the web UI comes with pier's Nix package and service
+   (`todos/pi-durable.md` in dotfiles).
 
-The recommendation depends on how soon Will wants web or phone access to pier's
-conversations. If it's soon, option 2, kept to the minimal scope above, on the tailnet
-with a pairing code or a token. If not, option 1.
+## Done when
 
-## Questions for Will
-
-1. Build a web UI in pier now (2 or 3), or not (1)?
-2. If so: Elanor or not?
-3. This machine only, or the tailnet and the phone?
-4. Sign-in: a token in a private file, or a pairing code approved from a terminal?
-5. The exception to `docs/principles.md`, section 1: what it allows (a web UI for pier's
-   own conversations, on loopback and the tailnet, with one owner) and what it still
-   rules out (several users, Radius, public exposure)?
-
-## Decided
-
-Nothing yet.
+Will can follow and steer a pier conversation from his phone over the tailnet, and
+from a browser on the same machine, signed in as decided. Then the setup goes in
+`README.md`, and this file is deleted. If p3's web UI comes to cover most of the same
+ground, pier's is deprecated and removed (`docs/principles.md`, section 1).
