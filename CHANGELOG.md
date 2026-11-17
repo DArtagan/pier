@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/DArtagan/pier/compare/v0.4.0...v0.5.0) (2026-11-17)
+
+
+### Features
+
+* **tui:** Alt+Up takes queued messages back into the editor, as in pi ([64316e3](https://github.com/DArtagan/pier/commit/64316e36aa140422813c2f4519de5fe0d9d64bb2))
+* **tui:** pi's command menu, with pickers for /model, /thinking, /resume, /fork and /tree ([64316e3](https://github.com/DArtagan/pier/commit/64316e36aa140422813c2f4519de5fe0d9d64bb2))
+* **tui:** Up recalls a conversation's earlier messages, from every session, as in pi ([64316e3](https://github.com/DArtagan/pier/commit/64316e36aa140422813c2f4519de5fe0d9d64bb2))
+
+
+### Bug Fixes
+
+* **tui:** the client's own lines scroll away with the transcript instead of staying above the editor ([64316e3](https://github.com/DArtagan/pier/commit/64316e36aa140422813c2f4519de5fe0d9d64bb2))
+
 ## [0.4.0](https://github.com/DArtagan/pier/compare/v0.3.0...v0.4.0) (2026-11-17)
 
 
