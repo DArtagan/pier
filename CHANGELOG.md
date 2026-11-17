@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/DArtagan/pier/compare/v0.3.0...v0.4.0) (2026-11-17)
+
+
+### Features
+
+* **tui:** pi's colors for the footer and the editor's lines, and the plan's room left in green ([7d7aa30](https://github.com/DArtagan/pier/commit/7d7aa3087912e8ff7c71b34a6b2f84b51b754967))
+* **tui:** pi's working line in the editor's border, and a line after each run counting its turns and time ([7d7aa30](https://github.com/DArtagan/pier/commit/7d7aa3087912e8ff7c71b34a6b2f84b51b754967))
+* **tui:** the terminal's own cursor in the editor, from pi's showHardwareCursor, so an unfocused pane shows none ([7d7aa30](https://github.com/DArtagan/pier/commit/7d7aa3087912e8ff7c71b34a6b2f84b51b754967))
+
 ## [0.3.0](https://github.com/DArtagan/pier/compare/v0.2.0...v0.3.0) (2026-11-17)
 
 
