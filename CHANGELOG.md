@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0](https://github.com/DArtagan/pier/compare/v0.2.0...v0.3.0) (2026-11-17)
+
+
+### Features
+
+* **tui:** a footer as pi's, with token totals, cost, the context gauge and the Claude plan's windows ([f8180bb](https://github.com/DArtagan/pier/commit/f8180bb1a6fbdaccd739a90f258a12f761ff1e5d))
+* **tui:** Ctrl+Up and Ctrl+Down jump between your messages in fullscreen ([e46fdec](https://github.com/DArtagan/pier/commit/e46fdec5195dabe457e81a1f0d45c051660ac5c6))
+* **tui:** draw answers, thinking, user messages and summaries with pi's components, with Ctrl+T to hide thinking ([f8180bb](https://github.com/DArtagan/pier/commit/f8180bb1a6fbdaccd739a90f258a12f761ff1e5d))
+* **tui:** draw tool calls as pi does, edits as diffs, with Ctrl+O to expand them ([f8180bb](https://github.com/DArtagan/pier/commit/f8180bb1a6fbdaccd739a90f258a12f761ff1e5d))
+* **tui:** leaving fullscreen prints the transcript into the terminal's scrollback ([e46fdec](https://github.com/DArtagan/pier/commit/e46fdec5195dabe457e81a1f0d45c051660ac5c6))
+* **tui:** reconnect after the daemon restarts, resuming the transcript where it left off ([fc28809](https://github.com/DArtagan/pier/commit/fc2880943239e221c6eb6264daae34a6f05cbdc3))
+* **tui:** run fullscreen by default, as pi does, with scrolling, search, and copying a mouse selection; --tui-mode regular keeps the terminal's scrollback ([e46fdec](https://github.com/DArtagan/pier/commit/e46fdec5195dabe457e81a1f0d45c051660ac5c6))
+* **tui:** tool blocks in pi's colors, from the terminal's own, as pi asks for them ([f8180bb](https://github.com/DArtagan/pier/commit/f8180bb1a6fbdaccd739a90f258a12f761ff1e5d))
+
+
+### Bug Fixes
+
+* a failed attach, such as /resume of a number that isn't there, no longer leaves the pane on a frozen view ([fc28809](https://github.com/DArtagan/pier/commit/fc2880943239e221c6eb6264daae34a6f05cbdc3))
+* **client:** a request on a closed connection fails at once instead of never settling ([fc28809](https://github.com/DArtagan/pier/commit/fc2880943239e221c6eb6264daae34a6f05cbdc3))
+* **tui:** fill the gaps a long outage leaves, and page /earlier past its first page ([f8180bb](https://github.com/DArtagan/pier/commit/f8180bb1a6fbdaccd739a90f258a12f761ff1e5d))
+
 ## [0.2.0](https://github.com/DArtagan/pier/compare/v0.1.0...v0.2.0) (2026-11-16)
 
 
