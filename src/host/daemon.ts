@@ -8,16 +8,25 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { cleanupSessionResources, type Models, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import {
+	clampThinkingLevel,
+	cleanupSessionResources,
+	getSupportedThinkingLevels,
+	type Models,
+	type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type Conversation,
 	type ConversationId,
+	type ConversationInit,
 	type ConversationWatch,
 	createRegistry,
 	defineDoc,
+	type EntryId,
 	type Extension,
 	Harness,
+	InboxDoc,
 	LiveDoc,
 	type LiveState,
 	ProviderDoc,
@@ -35,6 +44,7 @@ import {
 	type Event,
 	type Method,
 	type Methods,
+	type ModelSummary,
 	PROTOCOL_VERSION,
 	type Request,
 	type Response,
@@ -68,6 +78,22 @@ export const NumbersDoc = defineDoc<{ last: number; conversations: Record<string
 	initial: () => ({ last: 0, conversations: {} }),
 	// A base now and then, so a read replays a bounded number of changes.
 	checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 64,
+});
+
+/**
+ * Where a conversation was forked from, by pier's `fork`: the conversation, and the user
+ * message the fork went back to before. Durable records a fork's parent too, but a fork
+ * from before the first message is a new conversation Durable doesn't link to anything.
+ */
+export const ForkDoc = defineDoc<{ from?: ConversationId; before?: EntryId }>({
+	kind: "pier.fork",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	// A fork's own fork records its own parent, not its parent's.
+	fork: "initial",
+	initial: () => ({}),
+	checkpointWhen: () => true,
 });
 
 export interface DaemonOptions {
@@ -268,6 +294,105 @@ class ConversationAccess {
 		return { conversation, number, created: true };
 	}
 
+	/**
+	 * A new conversation whose history is `conversation`'s up to just before its user message
+	 * `before`, numbered as any other. Durable forks *at* an entry, the last one the fork
+	 * keeps, so this forks at the entry before; before the first message there's none, and
+	 * the result is a new conversation with the same model, thinking level and directory.
+	 */
+	async fork(conversation: Conversation, before: EntryId): Promise<number> {
+		const message = (await conversation.entries({ minEntryId: before, maxEntryId: before }, 1, undefined, context))
+			.items[0];
+		if (message?.kind !== "pi.user") throw new Error("Forks start at one of your messages");
+		const previous = (await conversation.entries({ maxEntryId: (before - 1) as EntryId }, 1, undefined, context))
+			.items[0];
+		let number = 0;
+		const init: ConversationInit = async (tx, id) => {
+			number = assign(await tx.doc(NumbersDoc), id);
+			const fork = await tx.doc(ForkDoc, id);
+			fork.from = conversation.id;
+			fork.before = before;
+		};
+		// The pane's environment comes with the client's attach, as for any conversation.
+		if (previous !== undefined) {
+			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
+		} else {
+			const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
+			await this.harness.createConversation(
+				{
+					ownership: { kind: "ownerless" },
+					agent: {
+						...(agent?.model === undefined ? {} : { model: agent.model }),
+						...(agent?.thinkingLevel === undefined ? {} : { thinkingLevel: agent.thinkingLevel }),
+						...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
+					},
+					init,
+				},
+				context,
+			);
+		}
+		return number;
+	}
+
+	/**
+	 * Withdraw `conversation`'s queued messages, steering and follow-ups, and return the text
+	 * of those withdrawn, oldest first. One a run took in meanwhile isn't withdrawn, and
+	 * isn't returned.
+	 */
+	async dequeue(conversation: Conversation): Promise<string[]> {
+		const inbox = await this.harness.snapshot(InboxDoc, conversation.id, context);
+		const texts: string[] = [];
+		for (const item of inbox?.items ?? []) {
+			if (item.mode === "write") continue;
+			const submission = await this.harness.submission(item.id, context);
+			if ((await submission?.abort(context)) !== "aborted") continue;
+			const text = textOf(item.content as string | readonly { type: string; text?: string }[]);
+			if (text.trim() !== "") texts.push(text);
+		}
+		return texts;
+	}
+
+	/** The models the daemon can run, for the client's pickers. */
+	async availableModels(): Promise<ModelSummary[]> {
+		const models = await this.models.getAvailable();
+		return models.map((model) => ({
+			provider: model.provider,
+			id: model.id,
+			...(model.name === undefined || model.name === model.id ? {} : { name: model.name }),
+			thinkingLevels: getSupportedThinkingLevels(model),
+		}));
+	}
+
+	/**
+	 * Change `conversation`'s model or thinking level. The thinking level is clamped to what
+	 * the model (the new one, if it changes) supports, as pi clamps it.
+	 */
+	async configure(
+		conversation: Conversation,
+		change: Methods["configure"]["params"],
+	): Promise<Methods["configure"]["result"]> {
+		const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
+		const ref = change.model ?? agent?.model ?? this.#options.model;
+		const model = this.models.getModel(ref.provider, ref.modelId);
+		if (change.model !== undefined && model === undefined) {
+			throw new Error(`No model ${change.model.provider}/${change.model.modelId}`);
+		}
+		const requested = change.thinkingLevel ?? agent?.thinkingLevel ?? this.#options.thinkingLevel;
+		const thinkingLevel =
+			requested === undefined || model === undefined ? requested : clampThinkingLevel(model, requested);
+		await conversation.configure(
+			{
+				...(change.model === undefined ? {} : { model: { ...change.model } }),
+				...(thinkingLevel === undefined ||
+				(change.thinkingLevel === undefined && thinkingLevel === agent?.thinkingLevel)
+					? {}
+					: { thinkingLevel }),
+			},
+			context,
+		);
+		return thinkingLevel === undefined ? {} : { thinkingLevel };
+	}
+
 	/** Number the top-level conversations that have no number yet, oldest first: those of a store from before numbers. */
 	async numberAll(): Promise<void> {
 		await this.harness.commit(async (tx) => {
@@ -310,9 +435,23 @@ class ConversationAccess {
 			const message = first?.model?.[0];
 			const text = message?.role === "user" ? textOf(message.content) : undefined;
 			const live = await this.harness.snapshot(LiveDoc, record.id, context);
+			// pier's record of the fork first: Durable has none for a fork from before the first message.
+			const fork = await this.harness.snapshot(ForkDoc, record.id, context);
+			const from = fork?.from ?? record.parent?.conversationId;
+			const parent = from === undefined ? undefined : byId.get(from);
+			// A fork's own messages, after those it shares with its parent: what sets it apart.
+			const own =
+				record.parent === undefined && fork?.from === undefined
+					? undefined
+					: await ownMessages(conversation, record.id);
+			const newestText = await newestMessage(conversation);
 			found.push({
 				id: record.id,
 				number,
+				...(parent === undefined ? {} : { parent: { number: parent } }),
+				...(own?.first === undefined ? {} : { branch: oneLine(own.first) }),
+				...(newestText === undefined ? {} : { latest: oneLine(newestText.text), active: newestText.timestamp }),
+				...(own === undefined ? {} : { ownMessages: own.count }),
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
@@ -388,14 +527,19 @@ class Connection {
 				);
 				return { submission: submission.id };
 			}
+			case "dequeue":
+				return { texts: await this.#conversations.dequeue(this.#conversation()) };
 			case "abort":
 				await this.#conversation().abort(context);
 				return {};
 			case "compact":
 				return { task: await this.#conversation().compact(request.params.instructions, context) };
 			case "configure":
-				await this.#conversation().configure(request.params, context);
-				return {};
+				return this.#conversations.configure(this.#conversation(), request.params);
+			case "models":
+				return { models: await this.#conversations.availableModels() };
+			case "fork":
+				return { number: await this.#conversations.fork(this.#conversation(), request.params.before) };
 			case "entries": {
 				const { limit, ...query } = request.params;
 				const page = await this.#conversation().entries(query, Math.min(limit, 500), undefined, context);
@@ -448,6 +592,41 @@ class Connection {
 	#send(message: Response | Event): void {
 		if (this.#socket.readyState === this.#socket.OPEN) this.#socket.send(JSON.stringify(message));
 	}
+}
+
+/** A message on one line, cut short, for a listing. */
+function oneLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/**
+ * The user messages a fork has of its own, after those it shares with its parent: its
+ * first, and how many. Ids come from one counter, so its own entries are those after its id.
+ */
+async function ownMessages(conversation: Conversation, id: ConversationId): Promise<{ first?: string; count: number }> {
+	const page = await conversation.entries(
+		{ minEntryId: id as unknown as EntryId, order: "ascending" },
+		500,
+		undefined,
+		context,
+	);
+	const texts = page.items.flatMap((entry) => {
+		const message = entry.kind === "pi.user" ? entry.model?.[0] : undefined;
+		return message?.role === "user" ? [textOf(message.content)] : [];
+	});
+	return { ...(texts[0] === undefined ? {} : { first: texts[0] }), count: texts.length };
+}
+
+/** The newest user message, and when the newest message of any kind was sent. */
+async function newestMessage(conversation: Conversation): Promise<{ text: string; timestamp?: number } | undefined> {
+	const page = await conversation.entries({}, 30, undefined, context);
+	const timestamp = page.items.map((entry) => entry.model?.[0]?.timestamp).find((time) => typeof time === "number");
+	for (const entry of page.items) {
+		const message = entry.kind === "pi.user" ? entry.model?.[0] : undefined;
+		if (message?.role === "user")
+			return { text: textOf(message.content), ...(timestamp === undefined ? {} : { timestamp }) };
+	}
+	return undefined;
 }
 
 function textOf(content: string | readonly { type: string; text?: string }[]): string {

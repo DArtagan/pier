@@ -15,6 +15,9 @@ to Earendil's p3, stay upstream-first and current, keep it local and minimal, ba
 claims with evidence, and leave direction to Will. Code that carries over goes in
 `src/layer/`, which must never import `src/host/` (`test/layer.test.ts`).
 
+**Change files with the edit tool**, not `sed`, `python` or other scripts: an edit
+shows exactly what changed, and fails loudly when its text doesn't match.
+
 ## Commands
 
 - `direnv allow` once (or `devenv shell`): Node, npm install, and the git hooks.

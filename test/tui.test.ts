@@ -16,6 +16,7 @@ import {
 	Container,
 	setCapabilityOverrides,
 	type Terminal,
+	Text,
 	TuiMainScreen,
 } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -76,6 +77,39 @@ describe("fillTranscript", () => {
 		expect(rendered.size).toBe(4);
 		expect(text(transcript)).toContain("message 4");
 		expect(text(transcript)).toContain("streaming more");
+	});
+
+	// "restored 2 queued messages" and the like scroll away with the transcript, rather
+	// than staying pinned above the editor.
+	it("draws the client's notices after the message that was newest when each appeared", () => {
+		const transcript = new Container();
+		const notice = (after: number | undefined, line: string) => ({
+			after: after as EntryId | undefined,
+			component: new Text(line, 0, 0),
+		});
+		const notices = [
+			notice(undefined, "new conversation #8"),
+			notice(1, "after one"),
+			notice(3, "after three"),
+			notice(4, "after the newest"),
+		];
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		fillTranscript(transcript, view(4, "streaming"), new Map(), style, notices);
+		const shown = text(transcript);
+		const order = [
+			"new conversation #8",
+			"message 1",
+			"after one",
+			"message 2",
+			"message 3",
+			"after three",
+			"message 4",
+			"after the newest",
+			"streaming",
+		];
+		const at = order.map((line) => shown.indexOf(line));
+		expect(at.every((index) => index >= 0)).toBe(true);
+		expect(at).toEqual([...at].sort((a, b) => a - b));
 	});
 });
 

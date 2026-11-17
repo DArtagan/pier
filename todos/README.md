@@ -16,11 +16,6 @@ loopback, tailnet, a tunnel), with Earendil's p2 as prior art. The local part wa
 settled for the thin slice on 2026-11-13. Its remote-access options feed the sign-in
 deep dive in `web.md`, and then it goes.
 
-**[tui.md](tui.md) — the terminal client, for daily use**
-Robustness and rendering landed 2026-11-16 (`docs/history.md`). Left: images, and pi's
-habits (`/model`, `!command`, `@file`, pickers, Will's keybindings and settings), which
-Will prunes first.
-
 **[web.md](web.md) — a web UI on Elanor, for this machine, the tailnet and the phone**
 Decided by Will on 2026-11-16, as an exception in `docs/principles.md`; deprecated
 once p3's web UI covers the same ground. Findings on Elanor, p3 and p2, then a plan

@@ -47,7 +47,7 @@ In order, verbatim. Later ones that replace earlier ones say so.
 - **A web UI** as an exception to the thin slice (2026-11-16): recorded in
   `docs/principles.md`, section 1, and `todos/web.md`.
 - **The terminal client's order** (2026-11-16): robustness, rendering, then pi's
-  habits; `todos/tui.md`.
+  habits; done 2026-11-17 ("The terminal client, for daily use", below).
 - **Packaging** (2026-11-16): a daemon on thenixbeast and the Steam Deck, started at
   login (dotfiles' `modules/pi/pier.nix`).
 - **Daily use isn't a gate** (2026-11-16): *"We can move on without completing the
@@ -143,7 +143,7 @@ Will, 2026-11-16: *"I'm interested in starting to improve the TUI for day-to-day
 in the order *"Robustness, rendering, then pi's habits"*. Robustness and rendering
 landed that day (pier #8, #10, #11, then the polish after), each checked offline and by
 hand in tmux with real Claude; what the client does now is in `README.md`. pi's habits
-wait in `todos/tui.md`. What it took, and what it found:
+followed (#14, below). What it took, and what it found:
 
 - **Reconnecting** (#8). Found on the way: a request on a closed connection never
   settled (ws drops the send without a word); a failed `/resume` detached the pane
@@ -197,6 +197,56 @@ or tool renderers in 1.5.2. pier imports the first two from pi's `dist/` by path
 (`src/host/theme.ts`, `src/host/colors.ts`) and rebuilds the others from what is
 exported; an export from pi would replace each.
 
+### pi's habits (#14)
+
+Will pruned the list on 2026-11-16 and asked for: an autocomplete menu for the editor
+that doubles as the picker for commands' arguments (*"Ideally this picker can be pulled
+wholly from pi"*), `/model`, `/thinking`, `/resume`, `/fork` and `/tree`, Alt+Up, and
+the editor's history across sessions. Each was checked offline and by hand in tmux with
+real Claude; what they do is in `README.md`, "Use". What it took, and what it found:
+
+- **The menu is pi-tui's.** pi's `/` menu is `CombinedAutocompleteProvider`, drawn by
+  the editor, with a `getArgumentCompletions` per command (async allowed); pi fills it
+  in `createBaseAutocompleteProvider`, not exported. pier gives it its own commands
+  (`src/host/commands.ts`), and two nudges, reaching one private method: the argument
+  menu opens as soon as a picked command and its space are typed, and Enter on an
+  argument sends the command, where pi's editor needs a second Enter.
+- **Forks.** Durable forks *at* an entry, the last one kept, so pier forks before a
+  message by forking at the entry before it. Before the first message there's none, so
+  that fork is a new conversation, which Durable doesn't link to anything: `/tree`
+  missed it until pier recorded every fork's parent itself (`pier.fork`). Forks of
+  one conversation all share its first message, so `/tree` shows each by its first
+  message of its own.
+- **The prompt cache across branches**, by hand: switching between a conversation and
+  its fork, back and forth, every turn read 99.8% of its input from the cache.
+- **The client's own lines** ("new conversation #3", errors) were pinned above the
+  editor; they now sit in the transcript after the newest message when each appeared,
+  and scroll away (Will: *"these kind of messages should become just another block in
+  the output stream"*). Queued messages stay pinned until the run takes them in (Will:
+  *"that does make sense"*). Alt+Up says nothing (Will: *"Let's get rid of those alert
+  messages entirely"*).
+- **The history across sessions** clears pi-tui's editor's private `history` array when
+  the conversation changes: the editor can only add to it. A pi-tui bump may break it.
+- **Images: placeholders only.** Alacritty 0.17, asked outside tmux, answers neither
+  Kitty's graphics query nor iTerm2's, and its DA1 reply (`ESC[?6c`) lists no sixel;
+  pi-tui also gives every pane under tmux `images: null`. pier draws pi's `[Image: …]`
+  placeholder; Claude still sees the image (it read a red PNG and answered "Red").
+
+**Left out, by Will's decision** (2026-11-17), to be raised again only if daily use
+asks:
+
+- Reading his keybindings (`keybindings.json`) and the settings `tuiMode`,
+  `fullscreenCopyOnSelect` and `fullscreenWheelScrollLines`. His keybindings' one
+  change matches pier's keys, and those three settings are at pi's defaults, which
+  pier uses.
+- `!command`, `@file` completion, an external editor (Ctrl+G) and image paste.
+- pi's `/tree`, which moves within one session, with branch summaries and labels:
+  Durable branches by forking, so pier's branches are conversations.
+
+Then the spec was closed (Will, 2026-11-17: *"any additional changes I can make as the
+need arises. If what is already in this spec is complete, then we can consider it
+complete"*).
+
 ## Where the proof of concept ended
 
 Its "Done when", as written on 2026-10-28, on the day it was retired:
@@ -207,5 +257,5 @@ Its "Done when", as written on 2026-10-28, on the day it was retired:
   hand and under systemd.
 - The day-to-day flows of vanilla pi: prompt, steer, follow-up, Esc, thinking,
   `/compact`, `/new` and `/resume` are built. `/model`, `/fork`, `/tree`, `!` and
-  `@file` moved to `todos/tui.md`.
+  `@file` moved to the terminal client's spec, which built the first three (above).
 - Classic `pi` still works alongside: untouched.
