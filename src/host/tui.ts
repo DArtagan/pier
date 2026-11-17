@@ -153,6 +153,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	});
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
+	/** `/exit` during a run: shown last in the queue, and taken back with it by Alt+Up. */
 	let exitWhenIdle = false;
 	// The client's own lines, in the transcript of the conversation shown (`Notice`).
 	const notices: Notice[] = [];
@@ -207,7 +208,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			tui.requestRender();
 			return;
 		}
-		fillTranscript(transcript, view, rendered, style, notices);
+		fillTranscript(transcript, view, rendered, style, notices, exitWhenIdle ? ["/exit (Ctrl+C leaves now)"] : []);
 		editor.borderColor = editorBorder((view.docs["pi.agent"] as AgentState | undefined)?.thinkingLevel);
 		working.update(busy() && client.connected);
 		footer.update(footerState(view, windowOf(view)), statusText(conversation.number, client.connected));
@@ -453,7 +454,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				return;
 			case "exit":
 				exitWhenIdle = true;
-				if (busy()) status("leaving once the run ends; Ctrl+C leaves now");
+				// While a run goes, the queue shows it.
+				if (busy()) render();
 				else leaving?.(0);
 				return;
 			default:
@@ -463,15 +465,20 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	/**
 	 * Take back the queued messages into the editor, before what's typed there, as pi's
-	 * Alt+Up does: to edit them and send them again.
+	 * Alt+Up does: to edit them and send them again. A queued `/exit` comes back last, as
+	 * it was queued last, and the client stays.
 	 */
 	const dequeue = async () => {
 		// Silent, either way: the editor filling up, or not, says what happened.
 		const { texts } = await client.request("dequeue", {});
+		if (exitWhenIdle) {
+			exitWhenIdle = false;
+			texts.push("/exit");
+		}
 		if (texts.length === 0) return;
 		editor.setText([...texts, editor.getText()].filter((text) => text.trim() !== "").join("\n\n"));
 		// The daemon's answer comes after the key's frame: draw what it brought now.
-		tui.requestRender();
+		render();
 	};
 
 	/** Open `/name`'s menu, for its argument to be picked. */
@@ -729,6 +736,8 @@ export interface Notice {
  * Fill `transcript` with `view`'s entries and live state, reusing the components in
  * `rendered` for entries drawn before: entries never change once stored. `notices` go
  * after the entries they came after, in the order they came, and before what's live.
+ * `held` is what the client itself queued behind the run (`/exit`), drawn after what
+ * the daemon has queued.
  */
 export function fillTranscript(
 	transcript: Container,
@@ -736,6 +745,7 @@ export function fillTranscript(
 	rendered: Map<EntryId, Component>,
 	style: TranscriptStyle,
 	notices: readonly Notice[] = [],
+	held: readonly string[] = [],
 ): void {
 	transcript.clear();
 	// Entries come in id order, and notices in the order they came: before each entry go
@@ -788,7 +798,7 @@ export function fillTranscript(
 	// Those after the newest entry, before what's live (the streaming response, what's queued).
 	noticesBefore(undefined);
 	tools.follow(live);
-	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, style)) {
+	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, style, held)) {
 		transcript.addChild(component);
 	}
 }
@@ -888,7 +898,12 @@ export function compactionSummary(message: Message | undefined): string {
 	return (match?.[1] ?? text).trim();
 }
 
-function renderLive(live: LiveState, inbox: InboxState | undefined, style: TranscriptStyle): Component[] {
+function renderLive(
+	live: LiveState,
+	inbox: InboxState | undefined,
+	style: TranscriptStyle,
+	held: readonly string[],
+): Component[] {
 	const { tools } = style;
 	const components: Component[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
@@ -920,6 +935,7 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 		const text = "content" in item && typeof item.content === "string" ? item.content : "";
 		if (text !== "") components.push(new Text(dim(`queued: ${text}`), 1, 0));
 	}
+	for (const text of held) components.push(new Text(dim(`queued: ${text}`), 1, 0));
 	return components;
 }
 

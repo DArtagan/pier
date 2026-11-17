@@ -111,6 +111,23 @@ describe("fillTranscript", () => {
 		expect(at.every((index) => index >= 0)).toBe(true);
 		expect(at).toEqual([...at].sort((a, b) => a - b));
 	});
+
+	// `/exit` during a run waits for it, as a queued message does, so it's shown with them.
+	it("draws what the client queued itself after the daemon's queued messages", () => {
+		const transcript = new Container();
+		const queuing = view(1, "streaming");
+		const inbox = { items: [{ id: 7, mode: "followUp", content: "and then this" }] };
+		const withInbox = { ...queuing, docs: { ...queuing.docs, "pi.inbox": inbox } } as unknown as TranscriptView;
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		fillTranscript(transcript, withInbox, new Map(), style, [], ["/exit"]);
+		const shown = text(transcript);
+		const at = ["message 1", "streaming", "queued: and then this", "queued: /exit"].map((line) => shown.indexOf(line));
+		expect(at.every((index) => index >= 0)).toBe(true);
+		expect(at).toEqual([...at].sort((a, b) => a - b));
+
+		fillTranscript(transcript, withInbox, new Map(), style);
+		expect(text(transcript)).not.toContain("/exit");
+	});
 });
 
 describe("tool calls", () => {

@@ -27,7 +27,8 @@ Alt+Enter queues a follow-up, and Alt+Up takes what's queued back into the edito
 stops the run; Ctrl+C on an empty editor leaves, and the run carries on. Up in an empty
 editor recalls the conversation's earlier messages, from every session, as in pi. When
 the daemon restarts, the client reconnects and carries on where it left off. Queued
-messages stay above the editor until the run takes them in; the client's own lines
+messages stay above the editor until the run takes them in, and so does `/exit` during
+a run, last, until the run ends (Alt+Up takes it back with them); the client's own lines
 ("new conversation #3", "compacting in the background", errors) go into
 the transcript, and scroll away with it.
 
