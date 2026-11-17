@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.0](https://github.com/DArtagan/pier/compare/v0.5.0...v0.6.0) (2026-11-17)
+
+
+### Features
+
+* **skills:** offer PIER_SKILLS' skill directories and each project's own, in one skills extension ([#19](https://github.com/DArtagan/pier/issues/19)) ([20bf983](https://github.com/DArtagan/pier/commit/20bf983e9f96d5dd3cd2e8b5a857fe1762381907))
+
+
+### Bug Fixes
+
+* **client:** a message from the daemon that isn't pier's closes the connection instead of crashing the client ([46c154b](https://github.com/DArtagan/pier/commit/46c154bb4b93f5ee6b6f80eab781ee00a6a56ad8))
+* **daemon:** check every request against the protocol's schemas, and answer one that isn't valid with where and why ([46c154b](https://github.com/DArtagan/pier/commit/46c154bb4b93f5ee6b6f80eab781ee00a6a56ad8))
+* **daemon:** refuse to start with a model it can't run, a PIER_MODEL that isn't provider/model, or a PIER_THINKING that isn't pi's ([46c154b](https://github.com/DArtagan/pier/commit/46c154bb4b93f5ee6b6f80eab781ee00a6a56ad8))
+
 ## [0.5.0](https://github.com/DArtagan/pier/compare/v0.4.0...v0.5.0) (2026-11-17)
 
 
