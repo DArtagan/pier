@@ -247,6 +247,49 @@ Then the spec was closed (Will, 2026-11-17: *"any additional changes I can make 
 need arises. If what is already in this spec is complete, then we can consider it
 complete"*).
 
+## Skills
+
+Will, 2026-11-17: *"We need to implement some system for pier to use skills -
+specifically `ketch`, to enable online research."* What it does now is in `README.md`,
+"Skills". How it got there:
+
+- **A wrong turn: classic pi's discovery.** The first version had pier resolve skills
+  as pi does, with pi's package manager over `~/.pi/agent/settings.json`, leaving out
+  pi packages' skills, which lean on pi extensions pier doesn't load. It worked: by
+  hand with real Claude, asked about Zig's latest release without naming ketch, Claude
+  read ketch's `SKILL.md`, ran `ketch search` and `ketch scrape`, and answered with
+  cited sources. But it was built without reading p3's plans, against
+  `docs/principles.md`, and it tied the layer to classic pi's settings, which p3 won't
+  read. It never merged.
+- **p3 and p2** (`docs/upstream.md`, "Skills"): one prompt plugin lists every skill;
+  other plugins add directories to it.
+- **Will's decisions, 2026-11-17:**
+  - On one extension or one per tool: *"An extension-per-tool is still of some
+    interest to me, as it allows for other component to be packaged in - besides only
+    skills. I guess that could be future work and we could keep this one simple with a
+    `skill` extension who's only purpose is to load such."* One extension owns the
+    list, so per-tool extensions can add to it later, as p2's plugins do.
+  - Move gog and Todoist off `~/.pi/agent/skills` too, so pier reads nothing of
+    classic pi's for skills.
+  - *"The passing of extensions to `pier` should be explicit in the nix configs. Even
+    if it's explicitly the same list as `pi`, we want something where if in the future
+    I drop pi - `pier`'s configuration remains consistent."*
+  - *"Let's go with an environment variable. Keep it simple until we hit the bounds of
+    the present implementation."* `PIER_SKILLS`, over a config file, whose one
+    advantage was picking up a change without restarting the daemon.
+  - A trust check on a project's skills: *"No, let's not ask."* Recorded for the
+    isolation work (`docs/upstream.md`).
+- **Where packages put skills**: researched, not assumed. pier's first guess,
+  `share/<tool>/skills`, was the layout nixpkgs considered and turned down for
+  `share/skills/<pname>` (`docs/upstream.md`, "Prior art").
+- **dotfiles' `sequential-file-tools.ts`**, which stops classic pi running a `bash`
+  call beside the write or edit it was batched with: pier doesn't need it. Its daemon
+  sets Durable's `toolExecution: "sequential"`, which runs every round of tool calls
+  one at a time, in the model's order. Measured with a faux model: a slow first call
+  and a check batched after it missed the first call's file 5 times in 5 with
+  `"parallel"`, and never with `"sequential"`. A daemon test now fails without the
+  setting.
+
 ## Where the proof of concept ended
 
 Its "Done when", as written on 2026-10-28, on the day it was retired:
