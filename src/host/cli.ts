@@ -57,11 +57,11 @@ async function main(argv: string[]): Promise<number> {
 }
 
 async function attachTui(target: AttachTarget, mode: TuiMode): Promise<number> {
-	// pi's own settings, read only: the transcript starts with thinking shown or hidden as pi's would.
+	// pi's own settings, read only: its theme, and whether thinking starts hidden.
 	const settings = SettingsManager.create(process.cwd());
 	return runTui({
 		mode,
-		hideThinking: settings.getHideThinkingBlock(),
+		settings,
 		socketPath: await reachable(),
 		target,
 		cwd: process.cwd(),

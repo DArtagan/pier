@@ -3,10 +3,17 @@
 // draws them.
 import { stripVTControlCharacters } from "node:util";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
-import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
+import {
+	createBashToolDefinition,
+	getMarkdownTheme,
+	initTheme,
+	SettingsManager,
+	ToolExecutionComponent,
+} from "@earendil-works/pi-coding-agent";
 import type { EntryId, EntryRecord, LiveState, TranscriptView } from "@earendil-works/pi-durable";
 import { type Component, Container } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { startTheme } from "../src/host/theme.ts";
 import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "../src/host/tool-calls.ts";
 import { compactionSummary, fillTranscript, TranscriptStyle, takeTuiMode } from "../src/host/tui.ts";
 
@@ -280,5 +287,46 @@ describe("answers, thinking and summaries", () => {
 		style.setExpanded(true);
 		expect(show(transcript)).toContain("Ship it.");
 		expect(show(transcript)).not.toContain("<summary>");
+	});
+});
+
+describe("theme", () => {
+	// A TUI that answers the color query as a dark terminal does.
+	const terminal = (colors: object) =>
+		({
+			requestRender() {},
+			invalidate() {},
+			setTerminalColorSchemeNotifications() {},
+			onTerminalColorSchemeChange: () => () => {},
+			queryTerminalColors: async () => colors,
+		}) as unknown as Parameters<typeof startTheme>[0];
+	const panel = () => {
+		const component = new ToolExecutionComponent(
+			"bash",
+			"x",
+			{ command: "ls" },
+			{},
+			createBashToolDefinition("/tmp"),
+			ui,
+			"/tmp",
+		);
+		component.updateResult({ content: [{ type: "text", text: "a" }], isError: false, durationMs: 1 });
+		return component.render(20)[1] ?? "";
+	};
+
+	afterEach(() => initTheme());
+
+	it("colors tool blocks from the terminal's own colors, as pi does", async () => {
+		const stop = await startTheme(
+			terminal({ background: { r: 24, g: 24, b: 24 }, foreground: { r: 220, g: 220, b: 220 } }),
+			SettingsManager.inMemory(),
+			() => {},
+		);
+		try {
+			// A 24-bit background on a finished call: pi's success shade.
+			expect(panel()).toContain("\x1b[48;2;");
+		} finally {
+			stop();
+		}
 	});
 });

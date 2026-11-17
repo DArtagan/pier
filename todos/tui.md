@@ -226,6 +226,24 @@ In the order Will chose (below).
   Benchmark rerun: fullscreen frames at 10,000 entries are now 9.4 ms p50 (4.3 before,
   1.2 before pi's tool component); at Will's longest session (about 1,700 entries)
   they're under 1 ms. pi's components cost more per line, as pi's own transcript does.
+- **Tool blocks' backgrounds** (asked by Will, 2026-11-16: *"A key component of the
+  running tool blocks in pi is that their background is a different color (there are
+  different shades with different meanings). Can you replicate that here?"*). pier
+  already draws pi's component, which asks the theme for `toolPendingBg`,
+  `toolSuccessBg` and `toolErrorBg`. pi's default theme, "system", makes those from the
+  terminal's own colors, which pi asks for at startup (OSC 10, 11 and 4); without an
+  answer it leaves panels blank. pier now asks as pi does, with pi's own
+  `InteractiveThemeController` (`src/host/theme.ts`, imported from pi's `dist/` by
+  path, since 1.5.2 doesn't export it), which also applies pi's `theme` setting and
+  follows light and dark switches. Offline, with a terminal that answers, a finished
+  call gets pi's 24-bit success shade; the test fails without the query.
+
+  **Not seen working by hand yet.** In a tmux 3.8 pane here (Alacritty attached, as
+  `alacritty` with `RGB`), the query got only the device attributes reply: tmux
+  answered none of OSC 10, 11 or 4, so no backgrounds showed, and classic pi in that pane
+  would get none either. Unchecked: whether Will's classic pi shows them inside tmux (if
+  it does, tmux answers in his own sessions in a way it didn't in this detached one),
+  and how Alacritty outside tmux answers.
 - **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
   Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
   be placeholders there.

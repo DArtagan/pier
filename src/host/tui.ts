@@ -12,6 +12,7 @@ import {
 	getMarkdownTheme,
 	getSelectListTheme,
 	initTheme,
+	SettingsManager,
 	UserMessageComponent,
 } from "@earendil-works/pi-coding-agent";
 import type {
@@ -41,6 +42,7 @@ import {
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
 import { Footer, footerState } from "./footer.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
+import { startTheme } from "./theme.ts";
 import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
@@ -84,8 +86,11 @@ export function takeTuiMode(args: readonly string[]): { mode: TuiMode; rest: str
 
 export interface TuiOptions {
 	mode: TuiMode;
-	/** pi's `hideThinkingBlock`: start with thinking hidden; Ctrl+T toggles it. */
-	hideThinking?: boolean;
+	/**
+	 * pi's own settings, read only: `theme`, and `hideThinkingBlock` (start with thinking
+	 * hidden; Ctrl+T toggles it). Without them, pi's defaults.
+	 */
+	settings?: SettingsManager;
 	socketPath: string;
 	target: AttachTarget;
 	cwd: string;
@@ -118,7 +123,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	const rendered = new Map<EntryId, Component>();
 	const style = new TranscriptStyle(markdownTheme, new ToolCalls(tui, options.cwd), {
-		hideThinking: options.hideThinking ?? false,
+		hideThinking: options.settings?.getHideThinkingBlock() ?? false,
 	});
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
@@ -363,6 +368,11 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		leaving = resolve;
 	});
 	tui.start();
+	// As pi does once its TUI has started: the terminal answers with its colors, which
+	// pi's system theme is made from, within 100 ms.
+	const stopTheme = await startTheme(tui, options.settings ?? SettingsManager.inMemory(), (message) =>
+		notify(red(message)),
+	);
 	try {
 		await attach(options.target);
 		watchConnection(client);
@@ -375,6 +385,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	left.abort();
 	// Stops the clocks of calls still running, which would keep the process alive.
 	style.clear();
+	stopTheme();
 	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
 	else tui.stop();
 	client.close();
