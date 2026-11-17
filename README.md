@@ -57,7 +57,6 @@ client is showing may not, and then they're blank.
 pier says what Durable says (its README, "Concepts"): a **turn** is one model response
 and its tool calls; a **run** is the turns from an input to its **final answer**, the
 response with no tool calls that ends it. A conversation is busy while a run is going.
-(pine-of-glass calls a run a "turn", and its turns "calls".)
 
 Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
 one conversation. Each conversation's tools run in its directory, with the environment
