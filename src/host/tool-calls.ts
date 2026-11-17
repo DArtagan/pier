@@ -4,7 +4,7 @@
 // pi's, but their arguments are, and an edit's result carries the `details.diff` pi's
 // edit renderer draws.
 //
-// One component per call, as in pi: the stored answer places it, the running slot
+// One component per call, as in pi: the stored model response places it, the running slot
 // updates it, and the stored result settles it. A component that started running has a
 // timer ticking ("Elapsed 3s") until it gets a final result, so a call that never gets
 // one (its task faulted, or the view moved on) is settled by `settle()`, and every
@@ -62,7 +62,7 @@ export function isThinkingKey(data: string): boolean {
 
 interface Call {
 	readonly component: ToolExecutionComponent;
-	/** Whether a stored answer placed it; until then, a streaming answer draws it. */
+	/** Whether a stored model response placed it; until then, a streaming one draws it. */
 	placed: boolean;
 	started: boolean;
 	/** The running output last shown, and whether the call has its final result. */
@@ -101,9 +101,9 @@ export class ToolCalls {
 	}
 
 	/**
-	 * The component of `toolCall`. `placed` is true from a stored answer, false from a
-	 * streaming one, whose arguments may still grow; `undefined` when a stored answer
-	 * placed it already (a streaming answer and its stored entry can show together).
+	 * The component of `toolCall`. `placed` is true from a stored model response, false
+	 * from a streaming one, whose arguments may still grow; `undefined` when a stored
+	 * response placed it already (a streaming response and its stored entry can show together).
 	 */
 	call(toolCall: ToolCall, placed: boolean): Component | undefined {
 		let call = this.#calls.get(toolCall.id);
@@ -136,7 +136,7 @@ export class ToolCalls {
 		return call.component;
 	}
 
-	/** An answer that ended in error or was aborted: its calls never ran. */
+	/** A model response that ended in error or was aborted: its calls never ran. */
 	failed(toolCall: ToolCall, message: string): void {
 		const call = this.#calls.get(toolCall.id);
 		if (call !== undefined && !call.settled) {

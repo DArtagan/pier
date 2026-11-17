@@ -3,17 +3,20 @@
 // pi's `FooterComponent` takes classic pi's `AgentSession`, so pier draws its own from
 // Durable's documents. A third line shows the Claude plan's windows, worded as
 // pi-quotas words them in Will's classic pi ("5h:86% left (↺in 2h 5m)"), from the
-// rate-limit diagnostic pi-claude-code puts on each answer.
+// rate-limit diagnostic pi-claude-code puts on each model response.
 import { relative, resolve, sep } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import type { AgentState, TranscriptView, UsageState } from "@earendil-works/pi-durable";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { colorer } from "./colors.ts";
 
-const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
-const dim = sgr(2, 22);
-const red = sgr(31, 39);
-const yellow = sgr(33, 39);
+// In pi's theme colors, as pi's footer and pi-quotas draw theirs: pi's footer in its
+// "dim" grey, the plan's room left in "success" green, amber and red as it runs out.
+const dim = colorer("dim");
+const red = colorer("error");
+const yellow = colorer("warning");
+const green = colorer("success");
 
 /** What the footer draws, gathered from the view by `footerState`. */
 export interface FooterState {
@@ -21,12 +24,12 @@ export interface FooterState {
 	/** Summed over every model the conversation used. */
 	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	cost: number;
-	/** The context the last answer was sent with; undefined until there is one, or after a compaction. */
+	/** The context the last model response was sent with; undefined until there is one, or after a compaction. */
 	context?: number;
 	contextWindow?: number;
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
-	/** The plan's windows, from the newest answer that reported them. */
+	/** The plan's windows, from the newest model response that reported them. */
 	plan?: readonly PlanWindow[];
 	/** Charged to usage credits (extra usage) rather than the plan. */
 	overage?: boolean;
@@ -82,8 +85,8 @@ export function footerState(view: TranscriptView, contextWindow: number | undefi
 	}
 	let context: number | undefined;
 	let plan: { windows: PlanWindow[]; overage: boolean } | undefined;
-	// Newest first: the last answer's context, and the newest plan windows, unless a
-	// compaction came after it (then pi says "?" until the next answer, as pier does).
+	// Newest first: the last model response's context, and the newest plan windows, unless
+	// a compaction came after it (then pi says "?" until the next response, as pier does).
 	const items = view.items;
 	let compacted = false;
 	for (let index = items.length - 1; index >= 0; index--) {
@@ -92,19 +95,19 @@ export function footerState(view: TranscriptView, contextWindow: number | undefi
 		if (item.entry.kind === "pi.compaction" || item.entry.kind === "pi.reset") compacted = true;
 		const message = item.entry.model?.[0];
 		if (message?.role !== "assistant") continue;
-		const answer = message as AssistantMessage & { diagnostics?: { type: string; details?: unknown }[] };
+		const response = message as AssistantMessage & { diagnostics?: { type: string; details?: unknown }[] };
 		if (
 			context === undefined &&
 			!compacted &&
-			answer.usage !== undefined &&
-			answer.stopReason !== "error" &&
-			answer.stopReason !== "aborted"
+			response.usage !== undefined &&
+			response.stopReason !== "error" &&
+			response.stopReason !== "aborted"
 		) {
-			const used = calculateContextTokens(answer.usage);
+			const used = calculateContextTokens(response.usage);
 			if (used > 0) context = used;
 		}
 		if (plan === undefined) {
-			for (const diagnostic of answer.diagnostics ?? []) {
+			for (const diagnostic of response.diagnostics ?? []) {
 				if (diagnostic.type === "claude-code.rate-limit") plan = planWindows(diagnostic.details) ?? plan;
 			}
 		}
@@ -157,10 +160,11 @@ function planWindow(window: PlanWindow, now: number): string {
 	const used = window.utilization * 100;
 	const left = Math.max(0, Math.min(100, Math.round(100 - used)));
 	const limited = window.status !== undefined && window.status !== "allowed";
-	const color = limited || used >= 90 ? red : used >= 80 ? yellow : undefined;
-	// The label is dim while there's room, and takes the warning's colour once there isn't.
-	const label = (color ?? dim)(`${window.label}:`);
-	const value = color === undefined ? `${left}% left` : color(`${left}% left`);
+	const warning = limited || used >= 90 ? red : used >= 80 ? yellow : undefined;
+	// As pi-quotas: the label dim while there's room, the value green; both take the
+	// warning's color once there isn't.
+	const label = (warning ?? dim)(`${window.label}:`);
+	const value = (warning ?? green)(`${left}% left`);
 	const reset = window.resetsAt === undefined ? "" : dim(` (↺in ${formatTimeRemaining(window.resetsAt * 1000 - now)})`);
 	return `${label}${value}${reset}`;
 }
@@ -173,8 +177,11 @@ export function footerLines(
 ): string[] {
 	const now = options.now ?? Date.now();
 	const where = state.cwd === undefined ? "" : formatCwd(state.cwd, options.home);
-	const first = [options.status, where].filter(Boolean).join(dim(" · "));
-	const lines = [truncateToWidth(dim(first), width, dim("..."))];
+	// Each part dimmed by itself: a status in its own color (reconnecting…) would end an
+	// outer dim, leaving the rest in the terminal's default.
+	const heading = [options.status ?? "", where].filter((part) => part !== "");
+	const first = heading.map((part) => dim(part)).join(dim(" · "));
+	const lines = [truncateToWidth(first, width, dim("..."))];
 
 	const parts: string[] = [];
 	const { tokens } = state;
@@ -182,7 +189,8 @@ export function footerLines(
 	if (tokens.output) parts.push(`↓${formatTokens(tokens.output)}`);
 	if (tokens.cacheRead) parts.push(`R${formatTokens(tokens.cacheRead)}`);
 	if (tokens.cacheWrite) parts.push(`W${formatTokens(tokens.cacheWrite)}`);
-	// Claude Code runs on the plan, so this is what the turns would have cost, as pi's "(sub)" says.
+	// Claude Code runs on the plan, so this is what the conversation's model responses would
+	// have cost at API prices, as pi's "(sub)" says.
 	const subscription = state.model?.provider === "claude-code";
 	if (state.cost || subscription) parts.push(`$${state.cost.toFixed(3)}${subscription ? " (sub)" : ""}`);
 	const window = state.contextWindow ?? 0;
