@@ -11,7 +11,7 @@ const layer = join(root, "src", "layer");
 /** Every module specifier a TypeScript file imports or re-exports, statically or dynamically. */
 function specifiers(source: string): string[] {
 	const found: string[] = [];
-	for (const match of source.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+)["']/g)) found.push(match[1] ?? "");
+	for (const match of source.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+)["']/gu)) found.push(match[1] ?? "");
 	return found;
 }
 

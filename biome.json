@@ -7,18 +7,32 @@
 		"includes": ["**", "!**/node_modules", "!**/dist", "!**/.devenv", "!**/.direnv", "!**/.worktrees"]
 	},
 	"linter": {
+		"domains": {
+			"test": "all"
+		},
 		"rules": {
+			"complexity": {
+				"noUselessUndefined": "error"
+			},
 			"correctness": {
 				"noUndeclaredDependencies": "error"
 			},
 			"nursery": {
 				"noFloatingPromises": "error",
 				"noMisusedPromises": "error",
-				"useExhaustiveSwitchCases": "error"
+				"useExhaustiveSwitchCases": "error",
+				"useUnicodeRegex": "error"
+			},
+			"performance": {
+				"noAwaitInLoops": "error"
 			},
 			"style": {
+				"noNegationElse": "error",
 				"noNonNullAssertion": "error",
 				"noParameterAssign": "error",
+				"noUnusedTemplateLiteral": "error",
+				"useConsistentTypeDefinitions": "error",
+				"useErrorCause": "error",
 				"useThrowNewError": "error"
 			},
 			"suspicious": {

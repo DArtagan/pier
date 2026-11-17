@@ -30,6 +30,6 @@ describe("defaultThinkingLevel", () => {
 	});
 
 	it("refuses one that isn't pi's", () => {
-		expect(() => defaultThinkingLevel({ PIER_THINKING: "HIGH" })).toThrow(/PIER_THINKING is "HIGH", not one of off, /);
+		expect(() => defaultThinkingLevel({ PIER_THINKING: "HIGH" })).toThrow(/PIER_THINKING is "HIGH", not one of off, /u);
 	});
 });

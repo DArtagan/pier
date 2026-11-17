@@ -139,6 +139,7 @@ export async function connectWhenUp(
 	for (;;) {
 		options.signal?.throwIfAborted();
 		try {
+			// biome-ignore lint/performance/noAwaitInLoops: a retry, each try after the last
 			return await PierClient.connect(socketPath);
 		} catch (error) {
 			if (error instanceof DaemonError) throw error;
@@ -236,6 +237,7 @@ export class AttachedConversation {
 			const gap = this.#current?.items.find((item) => item.kind === "gap");
 			if (gap === undefined || gap.kind !== "gap") return;
 			const transcript = this.#transcript;
+			// biome-ignore lint/performance/noAwaitInLoops: the next gap is found in the view this fill brings
 			const view = await transcript.fillGap(gap, context);
 			// Another conversation's view arrived meanwhile: its transcript is a new one.
 			if (transcript !== this.#transcript) return;

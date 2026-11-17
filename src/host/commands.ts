@@ -76,7 +76,7 @@ const items = <T>(
 
 /** One line of a message, for a menu. */
 const oneLine = (text: string, length = 70) => {
-	const line = text.replace(/\s+/g, " ").trim();
+	const line = text.replace(/\s+/gu, " ").trim();
 	return line.length > length ? `${line.slice(0, length - 1)}…` : line;
 };
 
@@ -250,7 +250,9 @@ function ago(ms: number): string {
 }
 
 /** pi-tui's editor opens its menu as a key does with this; private in its types, a method in its code. */
-type Triggers = { tryTriggerAutocomplete?: () => void };
+interface Triggers {
+	tryTriggerAutocomplete?: () => void;
+}
 
 /**
  * pi's editor, with its menu one step closer to a picker: a command whose argument is
@@ -263,7 +265,7 @@ export function asPicker(editor: CustomEditor): void {
 	editor.handleInput = (data: string) => {
 		const picking =
 			editor.isShowingAutocomplete() &&
-			/^\/\S+ /.test(editor.getText()) &&
+			/^\/\S+ /u.test(editor.getText()) &&
 			getKeybindings().matches(data, "tui.select.confirm");
 		const before = editor.getText();
 		handle(data);
@@ -278,7 +280,7 @@ export function asPicker(editor: CustomEditor): void {
 
 /** Open the argument menu if the editor holds just a command whose argument is picked, and a space. */
 export function openArguments(editor: CustomEditor): void {
-	const command = /^\/(\S+) $/.exec(editor.getText())?.[1];
+	const command = /^\/(\S+) $/u.exec(editor.getText())?.[1];
 	if (command === undefined || !PICKED.has(command) || editor.isShowingAutocomplete()) return;
 	(editor as unknown as Triggers).tryTriggerAutocomplete?.();
 }

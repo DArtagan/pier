@@ -323,9 +323,7 @@ class ConversationAccess {
 			fork.before = before;
 		};
 		// The pane's environment comes with the client's attach, as for any conversation.
-		if (previous !== undefined) {
-			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
-		} else {
+		if (previous === undefined) {
 			const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
 			await this.harness.createConversation(
 				{
@@ -339,6 +337,8 @@ class ConversationAccess {
 				},
 				context,
 			);
+		} else {
+			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
 		}
 		return number;
 	}
@@ -353,6 +353,7 @@ class ConversationAccess {
 		const texts: string[] = [];
 		for (const item of inbox?.items ?? []) {
 			if (item.mode === "write") continue;
+			// biome-ignore lint/performance/noAwaitInLoops: oldest first, a handful at most, on synchronous storage (see `list`)
 			const submission = await this.harness.submission(item.id, context);
 			if ((await submission?.abort(context)) !== "aborted") continue;
 			const text = textOf(item.content as string | readonly { type: string; text?: string }[]);
@@ -433,6 +434,9 @@ class ConversationAccess {
 			// Subagents' conversations belong to their task, not to a person, and have no number.
 			const number = byId.get(record.id);
 			if (record.owner !== undefined || number === undefined) continue;
+			// One at a time. The storage answers synchronously, so in parallel there's nothing to
+			// overlap: 500 conversations listed in 27 ms that way, 25 ms like this.
+			// biome-ignore lint/performance/noAwaitInLoops: measured no faster in parallel (above)
 			const agent = await this.harness.snapshot(AgentDoc, record.id, context);
 			if (filter.cwd !== undefined && agent?.cwd !== filter.cwd) continue;
 			const conversation = await this.harness.conversation(record.id, context);
@@ -462,7 +466,7 @@ class ConversationAccess {
 				...(newestText === undefined ? {} : { latest: oneLine(newestText.text), active: newestText.timestamp }),
 				...(own === undefined ? {} : { ownMessages: own.count }),
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
-				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
+				...(text === undefined ? {} : { title: text.replace(/\s+/gu, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
 				activity: Number(newest?.id ?? record.id),
 			});
@@ -611,7 +615,7 @@ class Connection {
 
 /** A message on one line, cut short, for a listing. */
 function oneLine(text: string): string {
-	return text.replace(/\s+/g, " ").trim().slice(0, 80);
+	return text.replace(/\s+/gu, " ").trim().slice(0, 80);
 }
 
 /**

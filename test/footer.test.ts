@@ -92,7 +92,7 @@ describe("footer", () => {
 		);
 		const lines = plain(footerLines(state, 100, { home: "/home/will", status: "ready · #3", now: NOW }));
 		expect(lines[0]).toBe("ready · #3 · ~/repositories/pier");
-		expect(lines[1]).toMatch(/^↑12 ↓3\.4k R250k W9\.0k \$0\.140 \(sub\) 25\.5%\/200k +claude-opus-5-5 • high$/);
+		expect(lines[1]).toMatch(/^↑12 ↓3\.4k R250k W9\.0k \$0\.140 \(sub\) 25\.5%\/200k +claude-opus-5-5 • high$/u);
 		expect(lines[1]).toHaveLength(100);
 		expect(lines[2]).toBe("5h:86% left (↺in 2h 5m) 7d:92% left (↺in 6d 6h 5m)");
 	});

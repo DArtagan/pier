@@ -32,7 +32,7 @@ export function createPrompt(options: PromptOptions = {}): Extension {
 				"project_context",
 				(input) => {
 					const files = parts(input.agent.cwd ?? process.cwd()).contextFiles;
-					if (files.length === 0) return undefined;
+					if (files.length === 0) return;
 					return files.map((file) => `## ${file.path}\n\n${file.content}`).join("\n\n");
 				},
 				{ tag: false },

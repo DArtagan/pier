@@ -110,14 +110,14 @@ describe("working line", () => {
 	it("shows pi's spinner and Working in the editor's border while a run goes, and stops it after", () => {
 		const shown = editor();
 		const working = new WorkingLine(ui, shown);
-		expect(top(shown)).toMatch(/^─+$/);
+		expect(top(shown)).toMatch(/^─+$/u);
 		working.update(true);
-		expect(top(shown)).toMatch(/^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+$/);
+		expect(top(shown)).toMatch(/^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+$/u);
 		const first = top(shown);
 		vi.advanceTimersByTime(80);
 		expect(top(shown)).not.toBe(first);
 		working.update(false);
-		expect(top(shown)).toMatch(/^─+$/);
+		expect(top(shown)).toMatch(/^─+$/u);
 		// The spinner's timer is gone, or it would keep the client alive.
 		expect(vi.getTimerCount()).toBe(0);
 	});

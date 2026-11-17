@@ -19,7 +19,7 @@ import { socketPath, stateDir } from "./paths.ts";
 import type { AttachTarget } from "./protocol.ts";
 import { runTui, type TuiMode, takeTuiMode } from "./tui.ts";
 
-const USAGE = `usage: pier [--tui-mode fullscreen|regular] [new | resume <number> | list [--all] | daemon]`;
+const USAGE = "usage: pier [--tui-mode fullscreen|regular] [new | resume <number> | list [--all] | daemon]";
 
 async function main(argv: string[]): Promise<number> {
 	const taken = takeTuiMode(argv);
@@ -35,7 +35,7 @@ async function main(argv: string[]): Promise<number> {
 		case "new":
 			return attach({ kind: "new" });
 		case "resume": {
-			const number = Number(rest[0]?.replace(/^#/, ""));
+			const number = Number(rest[0]?.replace(/^#/u, ""));
 			if (!Number.isInteger(number) || number < 1) {
 				console.error(USAGE);
 				return 2;
@@ -89,8 +89,8 @@ async function reachable(): Promise<string> {
 	try {
 		(await PierClient.connect(path)).close();
 		return path;
-	} catch {
-		throw new Error(`No pier daemon on ${path}: start one with \`pier daemon\``);
+	} catch (error) {
+		throw new Error(`No pier daemon on ${path}: start one with \`pier daemon\``, { cause: error });
 	}
 }
 

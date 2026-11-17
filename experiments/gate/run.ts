@@ -125,8 +125,18 @@ function host(
 	});
 }
 
-type Usage = { input: number; cacheRead: number; cacheWrite: number; cacheWrite1h?: number };
-type Answer = { stopReason: string; text: string; errorMessage?: string; usage?: Usage };
+interface Usage {
+	input: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cacheWrite1h?: number;
+}
+interface Answer {
+	stopReason: string;
+	text: string;
+	errorMessage?: string;
+	usage?: Usage;
+}
 const answer = (result: Line | undefined) => result?.answer as Answer | undefined;
 const text = (result: Line | undefined) => answer(result)?.text ?? "";
 const done = (result: Line | undefined) => result?.status === "done";
@@ -348,7 +358,7 @@ if (IDLE_MINUTES > 0) {
 {
 	const group = "all";
 	// pi-claude-code fails a turn billed to Extra Usage with a "Claude Code billing" error.
-	check(group, "nothing billed to Extra Usage", !/extra usage|Claude Code billing/i.test(transcript.join("\n")));
+	check(group, "nothing billed to Extra Usage", !/extra usage|Claude Code billing/iu.test(transcript.join("\n")));
 	const errors = transcript.filter((line) => line.includes('"errorMessage"'));
 	check(group, "no assistant errors", errors.length === 0, errors.join("\n"));
 	const reports = transcript.filter((line) => line.includes('"t":"report"'));
@@ -368,7 +378,7 @@ process.exitCode = failed.length === 0 ? 0 : 1;
 function descendantsOf(root: number): string[] {
 	const parents = new Map<number, number>();
 	const commands = new Map<number, string>();
-	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/u.test(entry))) {
 		try {
 			// The parent is the 2nd field after the parenthesized command, which may hold spaces.
 			const stat = readFileSync(`/proc/${name}/stat`, "utf8");
@@ -393,7 +403,7 @@ function descendantsOf(root: number): string[] {
 /** Live processes whose working directory is under `dir`: what a crash leaves running. */
 function processesIn(dir: string): string[] {
 	const found: string[] = [];
-	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name))) {
 		try {
 			if (!readlinkSync(`/proc/${pid}/cwd`).startsWith(dir)) continue;
 			found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120)}`);
