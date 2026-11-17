@@ -74,8 +74,10 @@ unless marked.
   overlays, images) with no agent dependencies.
 - **The coding agent exports its interactive components** "for extensions"
   (`packages/coding-agent/src/index.ts`), and `ModelRuntime`, `SettingsManager`,
-  `KeybindingsManager`, `loadProjectContextFiles` and `loadSkills`. Which of them fit
-  pier is in `todos/tui.md`.
+  `KeybindingsManager`, `loadProjectContextFiles` and `loadSkills`. pier's client uses
+  the components and pi's tool definitions' renderers. Not exported in 1.5.2: the theme
+  instance and theme controller (pier imports them from `dist/` by path), the working
+  indicator, the app keymap and `createAllToolRenderers` (pier rebuilds what it needs).
 - **Isolation, for later:** `@earendil-works/pi-env` runs tools on another machine
   through a small Rust daemon over SSH, while the harness and credentials stay local;
   Gondolin runs QEMU or krun micro-VMs.

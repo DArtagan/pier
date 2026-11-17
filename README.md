@@ -4,10 +4,10 @@ pi on [Pi Durable](https://earendil.com/posts/pi-durable): one daemon per host o
 every pi session, and terminals (later web and phone) attach to it as thin clients.
 Like a pier: it stays put, and boats tie up and cast off.
 
-**Status:** proof of concept, as a deliberately thin slice: a daemon, a Unix socket,
-and a minimal terminal client. Claude runs on a Durable Harness through Claude Code,
-with your Claude subscription, and survives a crash mid-tool, Esc, compaction and
-forks (pi 1.5.2, 2026-11-13). See [`todos/`](todos/) for what's next.
+**Status:** a deliberately thin slice, in daily use: a daemon, a Unix socket, and a
+terminal client drawn with pi's own components. Claude runs on a Durable Harness
+through Claude Code, with your Claude subscription, and survives a crash mid-tool, Esc,
+compaction and forks (pi 1.5.2). See [`todos/`](todos/) for what's next.
 
 ## Use
 
@@ -28,9 +28,29 @@ the run carries on. When the daemon restarts, the client reconnects and carries 
 where it left off.
 
 The client runs fullscreen, on the alternate screen, as pi does by default: it scrolls
-and searches (Ctrl+Shift+F) itself, and leaves the transcript in the terminal's
-scrollback when you leave. `--tui-mode regular`, pi's flag, draws it in the terminal's
-own scrollback instead.
+(PageUp, Ctrl+Home, Ctrl+End), jumps between your messages (Ctrl+Up, Ctrl+Down),
+searches (Ctrl+Shift+F), copies a mouse selection, and leaves the transcript in the
+terminal's scrollback when you leave. `--tui-mode regular`, pi's flag, draws it in the
+terminal's own scrollback instead.
+
+It looks like pi, as it's drawn by pi's components, in pi's theme, with your `theme`
+and `hideThinkingBlock` from pi's `settings.json`:
+
+- **Answers** with their thinking (Ctrl+T hides it), **tool calls** in pi's coloured
+  blocks (grey while running, green done, red failed), with edits as diffs and long
+  output collapsed (Ctrl+O expands it), and **compaction summaries** (Ctrl+O too).
+- **pi's working line** in the editor's border while a run goes, and after each run a
+  **turn line**, as pine-of-glass's cachemire draws one: `◍ turn: 3 calls · 9s · read
+  5.8k (99.9% cached) · wrote 1.2k · out 0.1k`.
+- **A footer** as pi's: the conversation and directory; tokens, what the turns would
+  have cost at API prices ("(sub)": you're on the plan), the context used, the model
+  and thinking level; and the Claude plan's 5-hour and 7-day windows, as pi-quotas
+  shows them.
+- A long outage leaves no hole: the client loads what it missed. `/earlier` loads older
+  messages.
+
+The terminal must answer pi's color query for tool blocks' backgrounds; a tmux pane no
+client is showing may not, and then they're blank.
 
 Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
 one conversation. Each conversation's tools run in its directory, with the environment

@@ -137,6 +137,64 @@ carried it, and dotfiles #11 runs the daemon as a user service. Checked under
 `systemd-run` with the unit's environment before the first switch, then running on
 thenixbeast.
 
+## The terminal client, for daily use
+
+Will, 2026-11-16: *"I'm interested in starting to improve the TUI for day-to-day use"*,
+in the order *"Robustness, rendering, then pi's habits"*. Robustness and rendering
+landed that day (pier #8, #10, #11, then the polish after), each checked offline and by
+hand in tmux with real Claude; what the client does now is in `README.md`. pi's habits
+wait in `todos/tui.md`. What it took, and what it found:
+
+- **Reconnecting** (#8). Found on the way: a request on a closed connection never
+  settled (ws drops the send without a word); a failed `/resume` detached the pane
+  first, freezing it on a view nothing updated; without an `error` listener a socket
+  error would have thrown out of the client.
+- **Fullscreen by default** (#10), Will: *"Yes, let's do both modes but make fullscreen
+  the default - using the same flag that pi uses to switch to the simpler terminal
+  mode."* Mouse selection copied through pi's `copyToClipboard`. Links and copying
+  needed tmux changes, in dotfiles `1035c03` (Will, the same day: *"Enable hyperlink
+  support in alacritty … set-clipboard for the tmux config"*): Shift+click opens a link
+  through Alacritty; OSC 52 copies reach Wayland's clipboard only from a pane a client
+  is showing, to a focused Alacritty window. Not yet tried over a real SSH session.
+- **Long transcripts** (`experiments/transcript/bench.ts`). Will's classic pi sessions
+  since October had a median of 79 messages and at most 1,687. Fullscreen frames stayed
+  well under a frame's budget: 1.2 ms (p50) at 10,000 entries on pier's own renderers,
+  9.4 ms once on pi's components, under 1 ms at 1,700. Regular mode is pi-tui's
+  `TuiMainScreen`, which diffs every line each frame: about 5 ms at 1,700 entries, as in
+  pi's own regular mode; not raised upstream.
+- **Gaps** (#11). The `entries` request dropped Durable's `next` cursor, which
+  `ConversationTranscript` reads as "nothing more", so `/earlier` stopped after one page
+  and a gap would have closed after one.
+- **pi's components** (#11). Tool calls are pi's `ToolExecutionComponent` with the
+  renderers of pi's exported tool definitions. Durable has tools of its own (it doesn't
+  depend on the coding agent, and its tools are durable tasks run through pi-env), and
+  p3's `coding-tools` plugin will follow p2's: Durable's tools drawn by a copy of pi's
+  renderers. pier imports them instead (Will: *"Yes please, carry on in that way"*).
+  pi's renderers tick a 1 s timer while a call runs, cleared only by a final result, so
+  pier settles calls whose slot goes without one, or the client wouldn't exit. Durable's
+  bash reports truncation and its spill file as diagnostics, in a `<harness>` block at
+  the end of the output, not in the `details` pi's renderer reads.
+- **Colors.** pi's default theme makes tool blocks' backgrounds from the terminal's own
+  colors, which pi asks for at startup; pier now asks with pi's own theme controller
+  (Will: *"The colors absolutely work now"*). A tmux pane no client shows got no
+  answer, and falls back to blank panels. The colour test first assumed 24-bit color
+  and failed on CI, which has no `COLORTERM`; the tests now pin 24-bit, 256 colors and a
+  terminal that never answers.
+- **The footer** (#11). pi-claude-code passes Claude Code's `rate_limit_event` on, with
+  the plan's 5-hour and 7-day windows (202 of 208 answers had it, read from the live
+  store). Its dollar figure is what the turns would cost at Anthropic's API prices
+  (pi-ai's price list), not a charge: "(sub)", as pi says.
+- **Polish** (Will's review, the same day): pi's working line in the editor's border, a
+  turn line after each run, pi's colors for the footer and the editor's lines, no
+  notices on attaching, and a blank line above the editor. The turn line is from
+  pine-of-glass's cachemire, an extension of Will's classic pi, found by running pi in
+  tmux; pier computes it from Durable's stored answers.
+
+pi exports none of its theme instance, theme controller, working indicator, app keymap
+or tool renderers in 1.5.2. pier imports the first two from pi's `dist/` by path
+(`src/host/theme.ts`, `src/host/colors.ts`) and rebuilds the others from what is
+exported; an export from pi would replace each.
+
 ## Where the proof of concept ended
 
 Its "Done when", as written on 2026-10-28, on the day it was retired:
