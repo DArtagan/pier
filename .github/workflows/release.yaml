@@ -5,6 +5,13 @@ on:
     branches:
       - main
 
+# One run at a time, never cancelled: two release-please runs at once race on the
+# release pull request and its tags. A run waiting behind another gives way to a
+# newer one, which is fine, since every run reads all of main since the last release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # Tags and a GitHub release only: pier publishes no artifact, because
   # dotfiles packages it with Nix.
