@@ -323,8 +323,10 @@ describe("theme", () => {
 			() => {},
 		);
 		try {
-			// A 24-bit background on a finished call: pi's success shade.
-			expect(panel()).toContain("\x1b[48;2;");
+			// A background on a finished call, pi's success shade: 24-bit where the terminal
+			// says it takes it (COLORTERM), else the nearest of 256. Without the terminal's
+			// colors, pi leaves the panel's background as the terminal's default (49).
+			expect(panel()).toMatch(/\[48;[25];/);
 		} finally {
 			stop();
 		}
