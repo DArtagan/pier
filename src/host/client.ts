@@ -194,7 +194,26 @@ export class AttachedConversation {
 
 	/** Load the page of entries before the oldest one held. */
 	async loadEarlier(context: Context): Promise<void> {
-		this.#publish(await this.#transcript.loadEarlier(context));
+		const transcript = this.#transcript;
+		const view = await transcript.loadEarlier(context);
+		if (transcript === this.#transcript) this.#publish(view);
+	}
+
+	/**
+	 * Load what's missing between the entries held, page by page, until no gap is left: a
+	 * gap opens when the daemon's window moved on without this client (a long outage, or a
+	 * client too slow for it). Rejects if the connection drops; reattaching resumes.
+	 */
+	async fillGaps(context: Context): Promise<void> {
+		for (;;) {
+			const gap = this.#current?.items.find((item) => item.kind === "gap");
+			if (gap === undefined || gap.kind !== "gap") return;
+			const transcript = this.#transcript;
+			const view = await transcript.fillGap(gap, context);
+			// Another conversation's view arrived meanwhile: its transcript is a new one.
+			if (transcript !== this.#transcript) return;
+			this.#publish(view);
+		}
 	}
 
 	subscribe(listener: (view: TranscriptView) => void): () => void {
@@ -205,8 +224,8 @@ export class AttachedConversation {
 
 	#newTranscript(): ConversationTranscript {
 		return new ConversationTranscript(async (query, limit) => {
-			const { entries } = await this.#client.request("entries", { ...query, limit });
-			return { items: entries };
+			const { entries, next } = await this.#client.request("entries", { ...query, limit });
+			return next === undefined ? { items: entries } : { items: entries, next };
 		});
 	}
 

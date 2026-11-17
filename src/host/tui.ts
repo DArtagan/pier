@@ -1,10 +1,20 @@
-// The terminal client: a transcript, a status line and an editor, attached to one
+// The terminal client: a transcript, notices, an editor and a footer, attached to one
 // conversation in the daemon. Deliberately thin; see docs/history.md, "The thin slice".
 // Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
 // terminal's own scrollback, as pi's flag does.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { copyToClipboard, getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
+import {
+	AssistantMessageComponent,
+	CompactionSummaryMessageComponent,
+	calculateContextTokens,
+	copyToClipboard,
+	getMarkdownTheme,
+	getSelectListTheme,
+	initTheme,
+	SettingsManager,
+	UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
 import type {
 	AgentState,
 	EntryId,
@@ -12,18 +22,17 @@ import type {
 	InboxState,
 	LiveState,
 	TranscriptView,
-	UsageState,
 } from "@earendil-works/pi-durable";
 import {
 	type Component,
 	Container,
 	Editor,
 	getKeybindings,
-	Markdown,
 	type MarkdownTheme,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
+	Spacer,
 	type Terminal,
 	Text,
 	TuiAltScreen,
@@ -31,19 +40,21 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
+import { Footer, footerState } from "./footer.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
+import { startTheme } from "./theme.ts";
+import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
 const dim = sgr(2, 22);
 const bold = sgr(1, 22);
 const red = sgr(31, 39);
-const green = sgr(32, 39);
 const yellow = sgr(33, 39);
-const cyan = sgr(36, 39);
 
 const HELP = [
 	"Enter sends; while Claude works, it steers. Alt+Enter queues a follow-up instead.",
 	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty.",
+	"Ctrl+O expands tools' output and summaries; Ctrl+T shows or hides thinking.",
 	"/new  /resume [all | <number>]  /earlier  /compact [instructions]  /thinking <level>",
 	"/detach (leave it running)  /quit (stop it, then leave)  /exit (wait for it, then leave)",
 	"Fullscreen: PageUp/PageDown scroll, Ctrl+Home/Ctrl+End go to the top/bottom, Ctrl+Up/Ctrl+Down jump",
@@ -75,6 +86,11 @@ export function takeTuiMode(args: readonly string[]): { mode: TuiMode; rest: str
 
 export interface TuiOptions {
 	mode: TuiMode;
+	/**
+	 * pi's own settings, read only: `theme`, and `hideThinkingBlock` (start with thinking
+	 * hidden; Ctrl+T toggles it). Without them, pi's defaults.
+	 */
+	settings?: SettingsManager;
 	socketPath: string;
 	target: AttachTarget;
 	cwd: string;
@@ -89,20 +105,26 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	// Aborted when the user leaves, which stops reconnecting.
 	const left = new AbortController();
 	initTheme();
+	installKeybindings();
 	const markdownTheme = getMarkdownTheme();
 
 	const terminal = new ProcessTerminal();
 	const tui = options.mode === "fullscreen" ? fullscreen(terminal) : new TuiMainScreen(terminal);
 	const transcript = new Container();
 	const notices = new Text("", 1, 0);
-	const status = new Text("", 1, 0);
+	const footer = new Footer(process.env.HOME);
+	// The context window of the conversation's model, from the daemon, for the footer's gauge.
+	let contextWindow: { model: string; tokens: number | undefined } | undefined;
 	const editor = new Editor(tui, { borderColor: dim, selectList: getSelectListTheme() });
-	const components = [transcript, notices, status, editor];
+	const components = [transcript, notices, editor, footer];
 	for (const component of components) tui.addChild(component);
-	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices, status], editor));
+	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices], editor, [footer]));
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
+	const style = new TranscriptStyle(markdownTheme, new ToolCalls(tui, options.cwd), {
+		hideThinking: options.settings?.getHideThinkingBlock() ?? false,
+	});
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
 	let exitWhenIdle = false;
@@ -117,16 +139,53 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const busy = () => live().run !== undefined;
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
 
+	/** The model's context window, asked of the daemon once per model; undefined until it answers. */
+	const windowOf = (shown: TranscriptView): number | undefined => {
+		const model = (shown.docs["pi.agent"] as AgentState | undefined)?.model;
+		if (model === undefined) return undefined;
+		const key = `${model.provider}/${model.modelId}`;
+		if (contextWindow?.model !== key && client.connected) {
+			contextWindow = { model: key, tokens: undefined };
+			void client
+				.request("model", { provider: model.provider, modelId: model.modelId })
+				.then((result) => {
+					if (contextWindow?.model === key) contextWindow = { model: key, tokens: result.contextWindow };
+					render();
+				})
+				.catch(() => {
+					// Asked again with the next view.
+					if (contextWindow?.model === key) contextWindow = undefined;
+				});
+		}
+		return contextWindow?.tokens;
+	};
 	const render = () => {
 		if (view === undefined) return;
-		fillTranscript(transcript, view, rendered, markdownTheme);
-		status.setText(statusLine(view, conversation.number, client.connected));
+		fillTranscript(transcript, view, rendered, style);
+		footer.update(footerState(view, windowOf(view)), statusText(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
+	};
+	// A gap opens when the daemon's window moved on without this client (a long outage, or a
+	// client too slow for it): load what's missing at once. A fill the connection cut short
+	// starts again with the view reconnecting brings.
+	let filling = false;
+	const fillGaps = () => {
+		if (filling || !client.connected || !view?.items.some((item) => item.kind === "gap")) return;
+		filling = true;
+		void conversation
+			.fillGaps(BACKGROUND_CONTEXT)
+			.catch((error: unknown) => {
+				if (client.connected) notify(red(`can't load the missed messages: ${errorText(error)}`));
+			})
+			.finally(() => {
+				filling = false;
+			});
 	};
 	conversation.subscribe((next) => {
 		view = next;
 		render();
+		fillGaps();
 	});
 
 	const attach = async (target: AttachTarget) => {
@@ -134,7 +193,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		// Cleared only once it worked, so a failed /resume leaves the transcript as it was.
 		const { created } = await conversation.attach(target, options.cwd, options.env);
 		// Entry ids are unique across conversations, so this only frees the old one's.
-		if (conversation.id !== before) rendered.clear();
+		if (conversation.id !== before) {
+			rendered.clear();
+			style.clear();
+		}
 		// The view can arrive before the reply that carries the number.
 		render();
 		notify(dim(`${created ? "new conversation" : "conversation"} #${conversation.number} in ${options.cwd}`));
@@ -182,6 +244,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			watchConnection(client);
 			notify(dim(`reconnected to #${conversation.number}`));
 			render();
+			// The view can arrive before `client` is the new connection, which `fillGaps` waits for.
+			fillGaps();
 		})()
 			.catch((error: unknown) => {
 				if (left.signal.aborted) return;
@@ -278,6 +342,16 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			}
 			return { consume: true };
 		}
+		if (isExpandKey(data)) {
+			style.setExpanded(!style.expanded);
+			tui.requestRender();
+			return { consume: true };
+		}
+		if (isThinkingKey(data)) {
+			style.setHideThinking(!style.hideThinking);
+			tui.requestRender();
+			return { consume: true };
+		}
 		if (matchesKey(data, "escape") && busy()) {
 			void client.request("abort", {}).catch(() => {});
 			return { consume: true };
@@ -294,6 +368,11 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		leaving = resolve;
 	});
 	tui.start();
+	// As pi does once its TUI has started: the terminal answers with its colors, which
+	// pi's system theme is made from, within 100 ms.
+	const stopTheme = await startTheme(tui, options.settings ?? SettingsManager.inMemory(), (message) =>
+		notify(red(message)),
+	);
 	try {
 		await attach(options.target);
 		watchConnection(client);
@@ -304,6 +383,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	}
 	const code = await done;
 	left.abort();
+	// Stops the clocks of calls still running, which would keep the process alive.
+	style.clear();
+	stopTheme();
 	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
 	else tui.stop();
 	client.close();
@@ -329,10 +411,15 @@ function fullscreen(terminal: Terminal): TuiAltScreen {
 }
 
 /**
- * The transcript scrolling above a dock that keeps the status and the editor in view, as
- * pi's `createChatViewport` lays them out (not exported in 1.5.2).
+ * The transcript scrolling above a dock that keeps the notices, the editor and the footer
+ * in view, as pi's `createChatViewport` lays them out (not exported in 1.5.2).
  */
-export function chatLayout(transcript: Component, above: readonly Component[], editor: Component): Component {
+export function chatLayout(
+	transcript: Component,
+	above: readonly Component[],
+	editor: Component,
+	below: readonly Component[] = [],
+): Component {
 	const scrolling = new ScrollView(transcript, {
 		follow: "end",
 		primary: true,
@@ -342,6 +429,7 @@ export function chatLayout(transcript: Component, above: readonly Component[], e
 	const dock = new VStack([
 		...above.map((component) => ({ component, shrink: 1, minSize: 0 })),
 		{ component: editor, shrink: 1, minSize: 3 },
+		...below.map((component) => ({ component, shrink: 1, minSize: 0 })),
 	]);
 	return new VStack([
 		{ component: scrolling, basis: 0, grow: 1, shrink: 1, minSize: 1 },
@@ -367,6 +455,91 @@ function leaveFullscreen(tui: TuiAltScreen, components: readonly Component[]): v
 }
 
 /**
+ * How the transcript draws, shared by every entry: pi's Markdown theme, the tool calls'
+ * components, and pi's two toggles, Ctrl+O (tools' output and summaries) and Ctrl+T
+ * (thinking). One per conversation shown.
+ */
+export class TranscriptStyle {
+	readonly markdown: MarkdownTheme;
+	readonly tools: ToolCalls;
+	readonly #answers = new Set<AssistantMessageComponent>();
+	readonly #summaries = new Set<CompactionSummaryMessageComponent>();
+	/** The answer still streaming: one component, updated as it grows, as pi's is. */
+	#streaming: AssistantMessageComponent | undefined;
+	#hideThinking: boolean;
+
+	constructor(markdown: MarkdownTheme, tools: ToolCalls, options: { hideThinking?: boolean } = {}) {
+		this.markdown = markdown;
+		this.tools = tools;
+		this.#hideThinking = options.hideThinking ?? false;
+	}
+
+	get expanded(): boolean {
+		return this.tools.expanded;
+	}
+
+	get hideThinking(): boolean {
+		return this.#hideThinking;
+	}
+
+	/** Expand or collapse tools' output and summaries, as Ctrl+O does in pi. */
+	setExpanded(expanded: boolean): void {
+		this.tools.setExpanded(expanded);
+		for (const summary of this.#summaries) summary.setExpanded(expanded);
+	}
+
+	/** Show or hide thinking, as Ctrl+T does in pi. */
+	setHideThinking(hide: boolean): void {
+		this.#hideThinking = hide;
+		for (const answer of this.#answers) answer.setHideThinkingBlock(hide);
+		this.#streaming?.setHideThinkingBlock(hide);
+	}
+
+	answer(message: AssistantMessage): AssistantMessageComponent {
+		const component = new AssistantMessageComponent(message, this.#hideThinking, this.markdown);
+		this.#answers.add(component);
+		return component;
+	}
+
+	/** The streaming answer's component, updated to `message`; a new one once a stored answer took the last's place. */
+	streaming(message: AssistantMessage): AssistantMessageComponent {
+		if (this.#streaming === undefined) {
+			this.#streaming = new AssistantMessageComponent(undefined, this.#hideThinking, this.markdown);
+		}
+		this.#streaming.updateContent(message, true);
+		return this.#streaming;
+	}
+
+	/** The answer stopped streaming: the next one gets a new component. */
+	streamEnded(): void {
+		this.#streaming = undefined;
+	}
+
+	/**
+	 * A compaction's summary, as pi draws it. `tokensBefore` is the context it summarized,
+	 * which Durable doesn't record: pi takes it from the last answer's usage before the
+	 * compaction, as `fillTranscript` does.
+	 */
+	summary(text: string, tokensBefore: number): CompactionSummaryMessageComponent {
+		const component = new CompactionSummaryMessageComponent(
+			{ role: "compactionSummary", summary: text, tokensBefore, timestamp: 0 },
+			this.markdown,
+		);
+		component.setExpanded(this.expanded);
+		this.#summaries.add(component);
+		return component;
+	}
+
+	/** Forget every component, as when the client shows another conversation. */
+	clear(): void {
+		this.tools.clear();
+		this.#answers.clear();
+		this.#summaries.clear();
+		this.#streaming = undefined;
+	}
+}
+
+/**
  * Fill `transcript` with `view`'s entries and live state, reusing the components in
  * `rendered` for entries drawn before: entries never change once stored.
  */
@@ -374,38 +547,87 @@ export function fillTranscript(
 	transcript: Container,
 	view: TranscriptView,
 	rendered: Map<EntryId, Component>,
-	markdown: MarkdownTheme,
+	style: TranscriptStyle,
 ): void {
 	transcript.clear();
+	const { tools } = style;
+	const live = (view.docs["pi.live"] ?? {}) as LiveState;
+	// The context the last answer so far was sent with: what a compaction after it summarized.
+	let context: number | undefined;
 	for (const item of view.items) {
+		if (item.kind === "entry") {
+			const message = item.entry.model?.[0];
+			// As pi's `getAssistantUsage`: failed answers, and ones without usage, don't count.
+			if (
+				message?.role === "assistant" &&
+				message.usage !== undefined &&
+				message.stopReason !== "error" &&
+				message.stopReason !== "aborted"
+			) {
+				const tokens = calculateContextTokens(message.usage);
+				if (tokens > 0) context = tokens;
+			}
+		}
 		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
-		else if (item.kind === "gap") transcript.addChild(new Text(dim("… some messages aren't loaded"), 1, 0));
+		else if (item.kind === "gap") transcript.addChild(new Text(dim("… loading the messages missed"), 1, 0));
 		else {
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
-				component = renderEntry(item.entry, markdown);
+				component = renderEntry(item.entry, style, context);
 				rendered.set(item.entry.id, component);
 			}
 			transcript.addChild(component);
 		}
 	}
-	const live = (view.docs["pi.live"] ?? {}) as LiveState;
-	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, markdown)) {
+	tools.follow(live);
+	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, style)) {
 		transcript.addChild(component);
 	}
 }
 
-function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
+function renderEntry(entry: EntryRecord, style: TranscriptStyle, context: number | undefined): Component {
+	const { tools } = style;
 	const message = entry.model?.[0];
-	if (entry.kind === "pi.compaction") return new Text(dim("── earlier messages were summarized ──"), 1, 1);
+	if (entry.kind === "pi.compaction") {
+		// pi's component says how many tokens were summarized; without an answer before it to tell, a plain rule.
+		if (context === undefined) return new Text(dim("── earlier messages were summarized ──"), 1, 1);
+		return withSpace(style.summary(compactionSummary(message), context));
+	}
 	if (entry.kind === "pi.reset") return new Text(dim("── a new context starts here ──"), 1, 1);
 	if (message === undefined || message.role === "system") return new Container();
 	if (message.role === "user") {
 		const text = typeof message.content === "string" ? message.content : textParts(message.content);
-		return new PromptZone(new Text(`${cyan(bold("›"))} ${text}`, 1, 1));
+		return withSpace(new UserMessageComponent(text, style.markdown));
 	}
-	if (message.role === "assistant") return renderAssistant(message, markdown);
-	// A tool result: its last lines, as pi shows them collapsed.
+	if (message.role === "assistant") return renderAssistant(message, style, true);
+	// A tool result settles its call's component, which draws it. One whose call isn't
+	// loaded (`/earlier` brought the result's page, not the answer's) draws itself until it is.
+	if (tools.result(message)) return new Container();
+	return new OrphanResult(message.toolCallId, tools, toolResultText(message));
+}
+
+/** A tool result whose call isn't loaded: its last lines, until the call's component draws it. */
+class OrphanResult implements Component {
+	readonly #callId: string;
+	readonly #tools: ToolCalls;
+	readonly #text: Text;
+
+	constructor(callId: string, tools: ToolCalls, text: Text) {
+		this.#callId = callId;
+		this.#tools = tools;
+		this.#text = text;
+	}
+
+	render(width: number): string[] {
+		return this.#tools.has(this.#callId) ? [] : this.#text.render(width);
+	}
+
+	invalidate(): void {
+		this.#text.invalidate();
+	}
+}
+
+function toolResultText(message: ToolResultMessage): Text {
 	const output = textParts(message.content).trimEnd();
 	const lines = output.split("\n");
 	const shown = lines.slice(-8).join("\n");
@@ -414,55 +636,53 @@ function renderEntry(entry: EntryRecord, markdown: MarkdownTheme): Component {
 }
 
 /**
- * A user message, marked as a prompt with OSC 133 as pi marks its own, so fullscreen's
- * previous and next prompt keys (and tmux, in regular mode) can jump between them.
+ * An answer as pi draws it (`AssistantMessageComponent`: Markdown, thinking shown or
+ * hidden, its error), followed by its tool calls (`ToolCalls`). `stored` is false for the
+ * answer still streaming.
  */
-class PromptZone implements Component {
-	readonly #inner: Component;
-
-	constructor(inner: Component) {
-		this.#inner = inner;
-	}
-
-	render(width: number): string[] {
-		const lines = this.#inner.render(width);
-		if (lines.length === 0) return lines;
-		const marked = [...lines];
-		marked[0] = `\x1b]133;A\x07${marked[0]}`;
-		marked[marked.length - 1] = `\x1b]133;B\x07\x1b]133;C\x07${marked.at(-1)}`;
-		return marked;
-	}
-
-	invalidate(): void {
-		this.#inner.invalidate();
-	}
-}
-
-function renderAssistant(message: AssistantMessage, markdown: MarkdownTheme): Component {
+function renderAssistant(message: AssistantMessage, style: TranscriptStyle, stored: boolean): Component {
+	const { tools } = style;
 	const container = new Container();
+	container.addChild(stored ? style.answer(message) : style.streaming(message));
 	for (const part of message.content) {
-		if (part.type === "text" && part.text.trim() !== "") container.addChild(new Markdown(part.text, 1, 1, markdown));
-		else if (part.type === "thinking" && part.thinking.trim() !== "") {
-			container.addChild(new Text(dim(`thinking: ${part.thinking.trim().split("\n")[0]?.slice(0, 120)}`), 1, 0));
-		} else if (part.type === "toolCall") {
-			container.addChild(new Text(`${green("●")} ${bold(part.name)} ${dim(summarizeArgs(part.arguments))}`, 1, 0));
+		if (part.type !== "toolCall") continue;
+		const component = tools.call(part, stored);
+		if (component !== undefined) container.addChild(component);
+		if (stored && (message.stopReason === "error" || message.stopReason === "aborted")) {
+			tools.failed(part, message.stopReason === "aborted" ? "Operation aborted" : message.errorMessage || "Error");
 		}
-	}
-	if (message.stopReason === "error" && message.errorMessage) {
-		container.addChild(new Text(red(message.errorMessage), 1, 0));
 	}
 	return container;
 }
 
-function renderLive(live: LiveState, inbox: InboxState | undefined, markdown: MarkdownTheme): Component[] {
+/** pi's components start with no blank line of their own; pi's chat puts a spacer before each. */
+function withSpace(component: Component): Component {
+	const container = new Container();
+	container.addChild(new Spacer(1));
+	container.addChild(component);
+	return container;
+}
+
+/** The summary in a compaction entry, without the wrapping Durable gives it for the model. */
+export function compactionSummary(message: Message | undefined): string {
+	if (message === undefined || message.role !== "user") return "";
+	const text = typeof message.content === "string" ? message.content : textParts(message.content);
+	const match = /<summary>\n?([\s\S]*?)\n?<\/summary>\s*$/.exec(text);
+	return (match?.[1] ?? text).trim();
+}
+
+function renderLive(live: LiveState, inbox: InboxState | undefined, style: TranscriptStyle): Component[] {
+	const { tools } = style;
 	const components: Component[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
-	if (partial !== undefined) components.push(renderAssistant(partial, markdown));
+	if (partial !== undefined) components.push(renderAssistant(partial, style, false));
+	else style.streamEnded();
 	if (live.generation?.retry !== undefined) {
 		components.push(new Text(yellow(`retrying: ${live.generation.retry.error}`), 1, 0));
 	}
 	for (const slot of live.tools ?? []) {
-		if (slot.status === "done") continue;
+		// Its call's component shows it, under the answer that made the call.
+		if (slot.status === "done" || tools.has(slot.callId)) continue;
 		const tail = (slot.output ?? "").trimEnd().split("\n").slice(-6).join("\n");
 		components.push(
 			new Text(
@@ -492,37 +712,16 @@ export function summaryLine(summary: ConversationSummary, withDirectory: boolean
 	return `${bold(`#${summary.number}`)}  ${summary.title ?? dim("(empty)")}${dim(`${summary.busy ? "  working" : ""}${where}`)}`;
 }
 
-function statusLine(view: TranscriptView, number: number | undefined, connected: boolean): string {
-	const agent = (view.docs["pi.agent"] ?? {}) as AgentState;
-	const usage = (view.docs["pi.usage"] ?? { models: {} }) as UsageState;
-	let tokens = 0;
-	for (const entry of Object.values(usage.models ?? {}))
-		tokens += entry.input + entry.output + entry.cacheRead + entry.cacheWrite;
+/** The footer's first words: what the client is doing, and which conversation. */
+function statusText(view: TranscriptView, number: number | undefined, connected: boolean): string {
 	const working = (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
-	const model = agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "default model";
-	return dim(
-		[
-			!connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready",
-			model,
-			`thinking ${agent.thinkingLevel ?? "default"}`,
-			`${Math.round(tokens / 1000)}k tokens`,
-			`#${number ?? "?"}`,
-			agent.cwd ?? "",
-		].join(" · "),
-	);
+	const doing = !connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready";
+	return `${doing}${dim(` · #${number ?? "?"}`)}`;
 }
 
 function textParts(content: readonly { type: string; text?: string }[] | string): string {
 	if (typeof content === "string") return content;
 	return content.map((part) => (part.type === "text" ? (part.text ?? "") : `[${part.type}]`)).join("");
-}
-
-function summarizeArgs(args: unknown): string {
-	if (args === null || typeof args !== "object") return "";
-	const record = args as Record<string, unknown>;
-	const main = record.command ?? record.path ?? record.file_path;
-	const text = typeof main === "string" ? main : JSON.stringify(args);
-	return text.replace(/\s+/g, " ").slice(0, 100);
 }
 
 function indent(text: string): string {

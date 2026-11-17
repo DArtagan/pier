@@ -17,7 +17,8 @@ import {
 	TuiAltScreen,
 	TuiMainScreen,
 } from "@earendil-works/pi-tui";
-import { chatLayout, fillTranscript } from "../../src/host/tui.ts";
+import { ToolCalls } from "../../src/host/tool-calls.ts";
+import { chatLayout, fillTranscript, TranscriptStyle } from "../../src/host/tui.ts";
 
 const COLUMNS = 120;
 const ROWS = 50;
@@ -74,12 +75,12 @@ function turn(first: number): EntryRecord[] {
 		assistant([
 			{ type: "thinking", thinking: "I should read the renderer first, then measure it." },
 			{ type: "text", text: answer },
-			{ type: "toolCall", id: "a", name: "bash", arguments: { command: "rg -n render src/host" } },
-			{ type: "toolCall", id: "b", name: "read", arguments: { path: "src/host/tui.ts" } },
+			{ type: "toolCall", id: `a${first}`, name: "bash", arguments: { command: "rg -n render src/host" } },
+			{ type: "toolCall", id: `b${first}`, name: "read", arguments: { path: "src/host/tui.ts" } },
 		]),
 		{
 			role: "toolResult",
-			toolCallId: "a",
+			toolCallId: `a${first}`,
 			toolName: "bash",
 			content: [{ type: "text", text: output }],
 			isError: false,
@@ -87,7 +88,7 @@ function turn(first: number): EntryRecord[] {
 		},
 		{
 			role: "toolResult",
-			toolCallId: "b",
+			toolCallId: `b${first}`,
 			toolName: "read",
 			content: [{ type: "text", text: output }],
 			isError: false,
@@ -143,12 +144,13 @@ function run(mode: "fullscreen" | "regular", count: number): string {
 
 	const stored = entries(count);
 	const rendered = new Map<EntryId, Component>();
+	const style = new TranscriptStyle(markdown, new ToolCalls(tui, "/tmp/pier-bench"));
 	gc();
 	const heapBefore = process.memoryUsage().heapUsed;
 
 	// The first frame with every entry new, as after /earlier or a long catch-up.
 	let start = performance.now();
-	fillTranscript(transcript, viewOf(stored, undefined), rendered, markdown);
+	fillTranscript(transcript, viewOf(stored, undefined), rendered, style);
 	tui.renderNow();
 	const cold = performance.now() - start;
 	const lines = transcript.render(COLUMNS).length;
@@ -162,7 +164,7 @@ function run(mode: "fullscreen" | "regular", count: number): string {
 		streamed += update % 12 === 11 ? "\n\n" : `word${update} `;
 		const view = viewOf(stored, streamed);
 		start = performance.now();
-		fillTranscript(transcript, view, rendered, markdown);
+		fillTranscript(transcript, view, rendered, style);
 		const filled = performance.now();
 		tui.renderNow();
 		fills.push(filled - start);

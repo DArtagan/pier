@@ -20,7 +20,9 @@ unless marked.
   `{ kind: "value", value, ops }`; `watchEvents()` and `viewState()` are gone. The
   view's `entries` are a window (the newest 50, at most 100), and
   `ConversationTranscript` keeps a client's transcript over it, pages older entries,
-  and resumes after a dropped connection with only what was missed. Deliveries fold
+  and resumes after a dropped connection with only what was missed. Its loader must
+  pass on the page's `next` cursor: a page without one means the start is reached, or a
+  gap filled, so dropping it stops paging after one page. Deliveries fold
   the commits made while the listener runs; past 10,000 pending operations, one
   whole-value replacement.
 - **Shown before stored.** Streamed text, tool output and a tool's `running` status

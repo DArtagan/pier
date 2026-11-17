@@ -244,6 +244,64 @@ describe("daemon", () => {
 		await until(first.conversation, (latest) => answered("three")(latest));
 	});
 
+	/** Turns `from` up to `to`, one after another, each answered: two entries a turn. */
+	async function converse(connected: PierClient, conversation: AttachedConversation, from: number, to: number) {
+		for (let turn = from; turn < to; turn++) {
+			await connected.request("submit", { text: `turn ${turn}` });
+			await until(conversation, answered(`answer ${turn}`));
+		}
+	}
+	const answers = (count: number) => Array.from({ length: count }, (_, turn) => fauxAssistantMessage(`answer ${turn}`));
+
+	it("loads earlier entries page by page, until the start", async () => {
+		await start(answers(80));
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		await converse(connected, conversation, 0, 80);
+		const id = conversation.id;
+		if (id === undefined) throw new Error("attached without an id");
+		const fresh = await client();
+		await fresh.conversation.attach({ kind: "id", id }, dir, {});
+		let view = await until(fresh.conversation, (latest) => latest.items.length > 0);
+		const total = (await connected.request("entries", { limit: 500 })).entries.length;
+		expect(total).toBeGreaterThan(150);
+		while (view.items[0]?.kind === "earlier") {
+			const before = entries(view).length;
+			await fresh.conversation.loadEarlier(BACKGROUND_CONTEXT);
+			view = await until(fresh.conversation, () => true);
+			expect(entries(view).length).toBeGreaterThan(before);
+		}
+		expect(entries(view).length).toBe(total);
+	});
+
+	it("fills the gap a long outage leaves", async () => {
+		await start(answers(70));
+		const first = await client();
+		await first.conversation.attach({ kind: "new" }, dir, {});
+		const id = first.conversation.id;
+		if (id === undefined) throw new Error("attached without an id");
+		await converse(first.client, first.conversation, 0, 2);
+		first.client.close();
+		await first.client.closed;
+
+		// More than the window holds (100) happens while it's away.
+		const other = await client();
+		await other.conversation.attach({ kind: "id", id }, dir, {});
+		await converse(other.client, other.conversation, 2, 70);
+
+		const next = await client();
+		await first.conversation.reattach(next.client, dir, {});
+		const gapped = await until(first.conversation, answered("answer 69"));
+		expect(gapped.items.map((item) => item.kind)).toContain("gap");
+		await first.conversation.fillGaps(BACKGROUND_CONTEXT);
+		const filled = await until(first.conversation, () => true);
+		expect(filled.items.map((item) => item.kind)).not.toContain("gap");
+		const ids = entries(filled).map((entry) => entry.id);
+		expect(ids).toEqual([...ids].sort((a, b) => a - b));
+		const total = (await next.client.request("entries", { limit: 500 })).entries.length;
+		expect(ids.length).toBe(total);
+	});
+
 	it("stays attached when attaching to a conversation that isn't there", async () => {
 		await start([fauxAssistantMessage("still attached")]);
 		const { client: connected, conversation } = await client();
@@ -292,6 +350,15 @@ describe("daemon", () => {
 				model: { provider: "faux", modelId: "faux-1" },
 			}),
 		).rejects.toThrow(/already listening/);
+	});
+
+	it("tells a client a model's context window, for its footer", async () => {
+		await start([]);
+		const { client: connected } = await client();
+		expect(await connected.request("model", { provider: "faux", modelId: "faux-1" })).toEqual({
+			contextWindow: faux.provider.getModels()[0]?.contextWindow,
+		});
+		expect(await connected.request("model", { provider: "faux", modelId: "nowhere" })).toEqual({});
 	});
 
 	it("rejects requests before attaching", async () => {

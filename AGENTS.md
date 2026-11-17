@@ -21,6 +21,11 @@ claims with evidence, and leave direction to Will. Code that carries over goes i
 - `npm test`: offline unit tests (vitest). `npm run check`: `tsc --noEmit`. Both run as
   pre-commit hooks, alongside biome, nixfmt, deadnix, statix, shellcheck and the
   whitespace fixers. `devenv test` runs both, and the build.
+- `npm run lint`: biome on `src/`, `test/` and `experiments/`; `npm run lint -- --write`
+  fixes what it can. biome comes from devenv's Nix packages, not npm, so **never run
+  `npx biome`**: npx finds no biome in `node_modules` and fetches `biome` from npm, an
+  unrelated environment-variable tool (it leaves a `~/.biome`). Not `biome check .`
+  either: it parses the `.pre-commit-config.yaml` symlink as JSON and fails.
 - `npm run build`: `tsc` compiles `src/` to `dist/`, which the `pier` bin runs. Node
   won't strip types under `node_modules`, where a package lands (`buildNpmPackage` in
   dotfiles). So nothing in `src/` may lean on type stripping at run time: no `.ts` file

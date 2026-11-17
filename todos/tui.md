@@ -39,14 +39,15 @@ themes:
   `TuiMainScreen`. User messages carry pi's OSC 133 prompt markers, which fullscreen's
   Ctrl+Up and Ctrl+Down jump between.
 
-- **The transcript:** user messages, answers as Markdown, the first line of thinking,
-  tool calls with a one-line summary of their arguments, and the last 8 lines of tool
-  results (red on error). Summaries and new contexts show as rules. `/earlier` loads
-  older entries.
+- **The transcript, drawn by pi's components:** user messages, answers with their
+  thinking (Ctrl+T hides it), tool calls (Ctrl+O expands their output), and compaction
+  summaries (Ctrl+O expands them). New contexts show as rules. `/earlier` loads older
+  entries. A gap left by a long outage fills itself.
 - **Live state:** the streaming answer, running tools with the last 6 lines of output,
   retries, compactions, queued input, and why a run failed.
-- **The status line:** working or ready, model, thinking level, tokens, `#number`,
-  directory.
+- **The footer,** under the editor, as pi's: working or ready, `#number` and the
+  directory; token totals, cost, the context gauge, model and thinking level; and the
+  Claude plan's 5-hour and 7-day windows, as pi-quotas shows them.
 - **Keys:** Enter sends, and steers while a run is going; Alt+Enter or Ctrl+Shift+Enter
   queues a follow-up; Esc stops the run; Ctrl+C clears the editor, or leaves when it's
   empty, as Ctrl+D does.
@@ -54,7 +55,7 @@ themes:
   `/thinking`, `/detach`, `/quit`, `/exit`, `/help`.
 - **Reconnecting** (landed 2026-11-16): when the connection drops, the client retries
   (250 ms, doubling to 2 s) until the daemon is back, then reattaches and resumes the
-  transcript with only what it missed. The status line says `reconnecting…`; text sent
+  transcript with only what it missed. The footer says `reconnecting…`; text sent
   meanwhile stays in the editor; Ctrl+C leaves. It gives up only when the daemon
   refuses (another protocol version, or the conversation is gone).
 
@@ -76,10 +77,19 @@ In the order Will chose (below).
     a view nothing updated any more; the daemon now opens the target first.
   - With no `error` listener after connecting, a socket error would have thrown out of
     the client.
-- **Gaps.** After a long outage, or a client too slow for the view's window, the
-  transcript holds a gap ("… some messages aren't loaded"), and nothing fills it:
-  `ConversationTranscript.fillGap()` would, from a command or on reconnecting. Not
-  seen in the runs by hand, whose outages missed fewer entries than the window holds.
+- **Gaps: done** (2026-11-16). After a long outage, or a client too slow for the view's
+  window (100 entries), the transcript holds a gap; the client now fills it at once,
+  page by page (`AttachedConversation.fillGaps()`, from the terminal client whenever a
+  view with a gap arrives, and again on reconnecting), showing "… loading the messages
+  missed" meanwhile. Found on the way, and fixed: the `entries` request dropped
+  Durable's `next` cursor, and `ConversationTranscript` takes a page without one to
+  mean there's nothing more. So `/earlier` loaded one page and then took it for the
+  conversation's start, and a gap would have been closed after one page, losing the
+  rest. `entries` now returns `next`; protocol version 3. Tested offline
+  (`test/daemon.test.ts`, both failing with the cursor dropped). By hand in tmux the
+  same day, with a faux model, not Claude (a gap takes over 100 entries while away): 70
+  turns ran on the same storage while the client was away; on reconnecting, all 70
+  appeared, once each, in order, and no marker was left.
 - **Long transcripts: measured, fine fullscreen** (2026-11-16,
   `node --expose-gc experiments/transcript/bench.ts`). Each update from the daemon
   refills the transcript (`fillTranscript`, reusing stored entries' components, which
@@ -150,26 +160,119 @@ In the order Will chose (below).
 
 ### Second: rendering
 
-- **Edits as diffs.** pi exports `renderDiff(diffText, options)`. Unchecked: whether
-  Durable's `edit` tool leaves a diff in its result's `details`, or pier has to compute
-  one from the arguments.
-- **Tool calls as pi draws them.** pi exports `ToolExecutionComponent(toolName,
-  toolCallId, args, options, toolDefinition, ui, cwd)`. Its renderers for pi's own
-  tools (`createAllToolRenderers`) are not exported in 1.5.2, and Durable's tools
-  aren't pi's tool definitions. Unchecked: how it draws a call with no definition.
-  The fallback is pier's own small renderers per tool (bash, read, write, edit).
-- **Answers and thinking as pi draws them:** `AssistantMessageComponent(message,
-  hideThinkingBlock, markdownTheme, …)` takes a pi-ai message, which is what Durable
-  stores. Probably a drop-in; it would also give a show/hide toggle for thinking.
-- **Summaries:** `CompactionSummaryMessageComponent`.
+- **Tool calls as pi draws them, edits as diffs: done** (2026-11-16,
+  `src/host/tool-calls.ts`). Each call is pi's `ToolExecutionComponent`, with the
+  renderers of the tool definitions pi exports (`createBashToolDefinition` and the rest
+  for bash, read, write and edit; `createAllToolRenderers` isn't exported in 1.5.2).
+  Other tools get pi's fallback: name, arguments as JSON, output. Checked first:
+  - Durable's `edit` stores `details.diff` in the format pi's edit renderer reads, so
+    an edit shows as pi's diff with nothing computed.
+  - Why Durable has tools of its own, and what p3 means to do (asked by Will): Durable
+    doesn't depend on pi-coding-agent or pi-agent-core, and its tools are durable
+    tasks that run through pi-env, with three result channels, so pi's tool definitions
+    don't fit it. p3's `coding-tools` plugin (slice 8, unbriefed) has p2's as
+    precedent: Durable's tools, drawn by a copy of pi's renderers
+    (`apps/p2/plugins/coding-tools/cards.ts`), edit showing the stored diff. pier
+    imports the renderers instead of copying them (Will, 2026-11-16: *"Yes please,
+    carry on in that way"*).
+
+  As in pi, one component per call: the stored answer places it, the running slot in
+  `pi.live` streams its output (with pi's "Elapsed" clock), and the stored result
+  settles it. Calls are never marked `setArgsComplete`, so an edit's renderer doesn't
+  read the file to preview a diff the result already has. Ctrl+O expands and
+  collapses every call (pi's `app.tools.expand`, added to pi-tui's keymap, since pi's
+  app keymap isn't exported; it's what the renderers' "ctrl+o to expand" hints name).
+
+  Found on the way: pi's renderers tick a 1 s `setInterval` while a call runs, cleared
+  only by a final result. A call whose slot goes without one (aborted, faulted, another
+  conversation) would tick forever and keep the process alive, so `ToolCalls` settles
+  those, and all of them on leaving; tests fail without either.
+
+  Not lost, but drawn differently (corrected 2026-11-16; first reported as lost): when
+  bash's output passes 2,000 lines or 50 KB, Durable keeps its tail, spills the whole to
+  a temporary file, and says so in two diagnostics ("Full output: <path>", "Output
+  truncated to its end: N lines, M bytes dropped"). They're stored twice: in the entry's
+  `data.diagnostics`, and in the result's content as a `<harness>` block, which the model
+  sees too. Nonzero exits work the same way ("Command exited with code 3"). pi's bash
+  renderer looks for them in `details`, which Durable's bash doesn't set, so it draws no
+  warning line of its own; the `<harness>` block is the output's last lines, so it shows
+  in the collapsed view anyway, verbatim. Seen with `seq 1 3000` on the faux model.
+
+  By hand in tmux with real Claude, the same day: `seq 1 40` collapsed to its last 5
+  lines with "35 earlier lines, ctrl+o to expand"; read showed its header only, as pi's
+  collapsed read does; an edit showed pi's diff; Ctrl+O expanded all three; a 20 s
+  loop streamed under its call with "Elapsed 12.0s", and after Esc showed "Took 16.3s"
+  and stayed still; leaving returned to the shell at once; reattaching drew the same.
+  Benchmark rerun: fullscreen frames at 10,000 entries rose from 1.2 to 4.3 ms p50.
+- **Answers, thinking, user messages and summaries as pi draws them: done**
+  (2026-11-16). pi's `AssistantMessageComponent`, `UserMessageComponent` and
+  `CompactionSummaryMessageComponent`, through `TranscriptStyle` in `src/host/tui.ts`.
+  - Thinking shows whole, as pi shows it, rather than its first line. Ctrl+T (pi's
+    `app.thinking.toggle`) hides and shows it; the client starts as pi's own
+    `hideThinkingBlock` says, read with pi's `SettingsManager` (read only; Will's is
+    `false`).
+  - The streaming answer is one component, updated as it grows, as in pi.
+  - pi's user and answer components mark OSC 133 prompt zones themselves, so pier's
+    own `PromptZone` went; answers are now zones too, as in pi.
+  - A summary shows collapsed ("Compacted from 44,780 tokens, ctrl+o to expand"), and
+    expanded with Ctrl+O, without Durable's `<summary>` wrapping. Durable doesn't record
+    the tokens a compaction summarized; pier takes them from the last answer's usage
+    before it, as pi does (`calculateContextTokens`), and falls back to a plain rule
+    when no answer before it is loaded rather than say "0 tokens".
+
+  By hand in tmux with real Claude, the same day: thinking showed above the answer,
+  Ctrl+T turned it to "Thinking..." and back; a poem streamed, thinking first; `/compact`
+  after reading three large files showed the collapsed summary, Ctrl+O the whole of it.
+  Benchmark rerun: fullscreen frames at 10,000 entries are now 9.4 ms p50 (4.3 before,
+  1.2 before pi's tool component); at Will's longest session (about 1,700 entries)
+  they're under 1 ms. pi's components cost more per line, as pi's own transcript does.
+- **Tool blocks' backgrounds** (asked by Will, 2026-11-16: *"A key component of the
+  running tool blocks in pi is that their background is a different color (there are
+  different shades with different meanings). Can you replicate that here?"*). pier
+  already draws pi's component, which asks the theme for `toolPendingBg`,
+  `toolSuccessBg` and `toolErrorBg`. pi's default theme, "system", makes those from the
+  terminal's own colors, which pi asks for at startup (OSC 10, 11 and 4); without an
+  answer it leaves panels blank. pier now asks as pi does, with pi's own
+  `InteractiveThemeController` (`src/host/theme.ts`, imported from pi's `dist/` by
+  path, since 1.5.2 doesn't export it), which also applies pi's `theme` setting and
+  follows light and dark switches. Offline, with a terminal that answers, a finished
+  call gets pi's 24-bit success shade; the test fails without the query.
+
+  **Working, by hand:** Will, 2026-11-16, in his own tmux pane: *"The colors absolutely
+  work now."* In a detached tmux 3.8 pane Claude drove the same day, the query got only
+  the device attributes reply, as tmux answered none of OSC 10, 11 or 4, so no
+  backgrounds showed there. So a pane no client shows may get no colors, and fall back
+  to pi's blank panels; why wasn't checked.
 - **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
   Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
   be placeholders there.
-- **A footer:** cost, context used against the model's window, and the Claude plan's
-  5-hour and 7-day windows. pi's `FooterComponent` takes classic pi's `AgentSession`,
-  so pier would draw its own. Cost and tokens are in `pi.usage`. Unchecked: whether
-  pi-claude-code passes the plan windows on, in its `claude-code.rate-limit`
-  diagnostic on each answer.
+- **A footer: done** (2026-11-16, `src/host/footer.ts`). pi's `FooterComponent` takes
+  classic pi's `AgentSession`, so pier draws its own, laid out as pi's and placed as
+  pi's `createChatViewport` places it, under the editor:
+  - `ready · #3 · ~/repositories/pier`: what the client is doing (it replaced pier's
+    status line), the conversation, the directory.
+  - `↑12 ↓3.4k R250k W9.0k $0.140 (sub) 25.5%/200k`, then the model and thinking level
+    on the right: pi's token totals (from `pi.usage`, every model the conversation
+    used), its cost with pi's "(sub)" for a subscription, and its context gauge, amber
+    past 70% and red past 90%. The context is the last answer's, as pi's; "?" after a
+    compaction until the next answer, as pi's. The model's window comes from a new
+    `model` request (protocol 4): the daemon's catalog knows it, the client doesn't.
+  - `5h:86% left (↺in 2h 5m) 7d:92% left (↺in 6d 6h 5m)`: the plan, worded as pi-quotas
+    words it in Will's classic pi, amber from 80% used and red from 90%, and "on usage
+    credits" in red if a turn was charged to them.
+
+  Checked first: pi-claude-code does pass the plan's windows on. Its
+  `claude-code.rate-limit` diagnostic carries Claude Code's `rate_limit_event`, with
+  `unifiedWindows.five_hour` and `.seven_day` (`utilization` 0 to 1, `resetsAt` in
+  seconds). Read from the live store, read only, 2026-11-16: 202 of 208 recent answers
+  had it. Missing, by design: pi-quotas' per-model 7-day windows and its pace warnings,
+  which come from Anthropic's API rather than Claude Code.
+
+  By hand in tmux with real Claude, the same day: the footer read `$0.000 (sub)
+  ?/1.0M` before the first answer (the daemon reported 1M for Opus 5.5), then
+  `↑2 ↓14 R1.2k W995 $0.008 (sub) 0.2%/1.0M … claude-opus-5-5 • high` and
+  `5h:85% left (↺in 3h 21m) 7d:92% left (↺in 6d 7h 21m)`; at 50 columns in regular mode
+  each line was cut to fit.
 
 ### Third: pi's habits
 
