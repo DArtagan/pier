@@ -80,6 +80,22 @@ export const NumbersDoc = defineDoc<{ last: number; conversations: Record<string
 	checkpointWhen: (_value, _ops, info) => info.deltasSinceBase >= 64,
 });
 
+/**
+ * Where a conversation was forked from, by pier's `fork`: the conversation, and the user
+ * message the fork went back to before. Durable records a fork's parent too, but a fork
+ * from before the first message is a new conversation Durable doesn't link to anything.
+ */
+export const ForkDoc = defineDoc<{ from?: ConversationId; before?: EntryId }>({
+	kind: "pier.fork",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	// A fork's own fork records its own parent, not its parent's.
+	fork: "initial",
+	initial: () => ({}),
+	checkpointWhen: () => true,
+});
+
 export interface DaemonOptions {
 	socketPath: string;
 	storage: Storage;
@@ -293,6 +309,9 @@ class ConversationAccess {
 		let number = 0;
 		const init: ConversationInit = async (tx, id) => {
 			number = assign(await tx.doc(NumbersDoc), id);
+			const fork = await tx.doc(ForkDoc, id);
+			fork.from = conversation.id;
+			fork.before = before;
 		};
 		// The pane's environment comes with the client's attach, as for any conversation.
 		if (previous !== undefined) {
@@ -416,13 +435,23 @@ class ConversationAccess {
 			const message = first?.model?.[0];
 			const text = message?.role === "user" ? textOf(message.content) : undefined;
 			const live = await this.harness.snapshot(LiveDoc, record.id, context);
-			const parent = record.parent === undefined ? undefined : byId.get(record.parent.conversationId);
+			// pier's record of the fork first: Durable has none for a fork from before the first message.
+			const fork = await this.harness.snapshot(ForkDoc, record.id, context);
+			const from = fork?.from ?? record.parent?.conversationId;
+			const parent = from === undefined ? undefined : byId.get(from);
+			// A fork's own messages, after those it shares with its parent: what sets it apart.
+			const own =
+				record.parent === undefined && fork?.from === undefined
+					? undefined
+					: await ownMessages(conversation, record.id);
+			const newestText = await newestMessage(conversation);
 			found.push({
 				id: record.id,
 				number,
-				...(parent === undefined || record.parent === undefined
-					? {}
-					: { parent: { number: parent, at: record.parent.at } }),
+				...(parent === undefined ? {} : { parent: { number: parent } }),
+				...(own?.first === undefined ? {} : { branch: oneLine(own.first) }),
+				...(newestText === undefined ? {} : { latest: oneLine(newestText.text), active: newestText.timestamp }),
+				...(own === undefined ? {} : { ownMessages: own.count }),
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
@@ -563,6 +592,41 @@ class Connection {
 	#send(message: Response | Event): void {
 		if (this.#socket.readyState === this.#socket.OPEN) this.#socket.send(JSON.stringify(message));
 	}
+}
+
+/** A message on one line, cut short, for a listing. */
+function oneLine(text: string): string {
+	return text.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+/**
+ * The user messages a fork has of its own, after those it shares with its parent: its
+ * first, and how many. Ids come from one counter, so its own entries are those after its id.
+ */
+async function ownMessages(conversation: Conversation, id: ConversationId): Promise<{ first?: string; count: number }> {
+	const page = await conversation.entries(
+		{ minEntryId: id as unknown as EntryId, order: "ascending" },
+		500,
+		undefined,
+		context,
+	);
+	const texts = page.items.flatMap((entry) => {
+		const message = entry.kind === "pi.user" ? entry.model?.[0] : undefined;
+		return message?.role === "user" ? [textOf(message.content)] : [];
+	});
+	return { ...(texts[0] === undefined ? {} : { first: texts[0] }), count: texts.length };
+}
+
+/** The newest user message, and when the newest message of any kind was sent. */
+async function newestMessage(conversation: Conversation): Promise<{ text: string; timestamp?: number } | undefined> {
+	const page = await conversation.entries({}, 30, undefined, context);
+	const timestamp = page.items.map((entry) => entry.model?.[0]?.timestamp).find((time) => typeof time === "number");
+	for (const entry of page.items) {
+		const message = entry.kind === "pi.user" ? entry.model?.[0] : undefined;
+		if (message?.role === "user")
+			return { text: textOf(message.content), ...(timestamp === undefined ? {} : { timestamp }) };
+	}
+	return undefined;
 }
 
 function textOf(content: string | readonly { type: string; text?: string }[]): string {

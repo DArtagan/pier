@@ -428,6 +428,8 @@ describe("daemon", () => {
 		const { conversations } = await connected.request("list", {});
 		const fork = conversations.find((summary) => summary.number === number);
 		expect(fork?.parent?.number).toBe(parent);
+		expect(fork?.branch).toBe("another way");
+		expect(fork?.ownMessages).toBe(1);
 		expect(conversations.find((summary) => summary.number === parent)?.parent).toBeUndefined();
 	});
 
@@ -439,6 +441,10 @@ describe("daemon", () => {
 		const first = (await connected.request("entries", { limit: 50 })).entries.find((entry) => entry.kind === "pi.user");
 		if (first === undefined) throw new Error("no message");
 		const { number } = await connected.request("fork", { before: first.id });
+		const parent = (await connected.request("list", {})).conversations.find(
+			(summary) => summary.number === number,
+		)?.parent;
+		expect(parent?.number).toBe(conversation.number);
 		await conversation.attach({ kind: "number", number }, dir, {});
 		expect((await connected.request("entries", { limit: 50 })).entries).toEqual([]);
 		await expect(connected.request("fork", { before: 1 as never })).rejects.toThrow(/your messages/);

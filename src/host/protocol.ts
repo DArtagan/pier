@@ -40,8 +40,16 @@ export interface ConversationSummary {
 	/** The first user message, cut short. */
 	readonly title?: string;
 	readonly busy: boolean;
-	/** For a fork: the conversation it was forked from, and the entry its history runs through. */
-	readonly parent?: { readonly number: number; readonly at: EntryId };
+	/** For a fork: the conversation it was forked from. */
+	readonly parent?: { readonly number: number };
+	/** For a fork: its first message of its own, after those it shares with its parent. */
+	readonly branch?: string;
+	/** For a fork: how many messages it has of its own. */
+	readonly ownMessages?: number;
+	/** The newest user message, cut short. */
+	readonly latest?: string;
+	/** When its newest message was sent, in ms since the epoch. */
+	readonly active?: number;
 }
 
 /** A model the daemon can run, for the client's `/model` and `/thinking` pickers. */

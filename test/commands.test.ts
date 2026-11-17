@@ -16,13 +16,29 @@ const MODELS: ModelSummary[] = [
 	{ provider: "claude-code", id: "claude-sonnet-5", thinkingLevels: ["off", "low", "medium", "high", "xhigh", "max"] },
 ];
 const CONVERSATIONS: ConversationSummary[] = [
+	// A fork of #3 from before its first message: nothing in common with it.
+	{
+		id: 11 as never,
+		number: 5,
+		cwd: "/work",
+		title: "a fresh start",
+		busy: false,
+		parent: { number: 3 },
+		branch: "a fresh start",
+		ownMessages: 1,
+		latest: "a fresh start",
+	},
+	// A fork of #1, which has two messages of its own.
 	{
 		id: 9 as never,
 		number: 3,
 		cwd: "/work",
-		title: "a fork of the first",
+		title: "the first",
 		busy: false,
-		parent: { number: 1, at: 5 as EntryId },
+		parent: { number: 1 },
+		branch: "a different second",
+		ownMessages: 2,
+		latest: "and a third",
 	},
 	{ id: 8 as never, number: 2, cwd: "/elsewhere", title: "somewhere else", busy: true },
 	{ id: 7 as never, number: 1, cwd: "/work", title: "the first", busy: false },
@@ -120,6 +136,7 @@ describe("the commands' menu", () => {
 		const { editor: target, sent } = editor();
 		await type(target, "/resume ");
 		const shown = menu(target);
+		expect(shown.indexOf("#5")).toBeLessThan(shown.indexOf("#3"));
 		expect(shown.indexOf("#3")).toBeLessThan(shown.indexOf("#1"));
 		expect(shown.indexOf("#1")).toBeLessThan(shown.indexOf("#2"));
 		expect(shown).toContain("/elsewhere");
@@ -167,12 +184,26 @@ describe("the editor's history", () => {
 });
 
 describe("family", () => {
-	it("lays out a conversation's forks from the root down", () => {
-		const tree = family(CONVERSATIONS, 3);
-		expect(tree.map(({ summary, depth }) => [summary.number, depth])).toEqual([
+	it("lays out a conversation's forks from the root down, whichever is shown", () => {
+		const expected = [
 			[1, 0],
 			[3, 1],
-		]);
+			[5, 2],
+		];
+		for (const shown of [1, 3, 5]) {
+			expect(family(CONVERSATIONS, shown).map(({ summary, depth }) => [summary.number, depth])).toEqual(expected);
+		}
 		expect(family(CONVERSATIONS, 2).map(({ summary }) => summary.number)).toEqual([2]);
+	});
+});
+
+describe("/tree's lines", () => {
+	it("tells forks apart by their own first message, with how many they have and the newest", async () => {
+		const { editor: target } = editor();
+		await type(target, "/tree ");
+		const shown = menu(target);
+		expect(shown).toMatch(/#1\s+the first/);
+		expect(shown).toMatch(/└ #3\s+→ a different second · current · 2 messages · latest: and a/);
+		expect(shown).toMatch(/└ #5\s+→ a fresh start/);
 	});
 });

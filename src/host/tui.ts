@@ -1,4 +1,4 @@
-// The terminal client: a transcript, notices, an editor and a footer, attached to one
+// The terminal client: a transcript (with the client's own notices in it), an editor and a footer, attached to one
 // conversation in the daemon. Deliberately thin; see docs/history.md, "The thin slice".
 // Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
 // terminal's own scrollback, as pi's flag does.
@@ -124,12 +124,6 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const tui =
 		options.mode === "fullscreen" ? fullscreen(terminal, hardwareCursor) : new TuiMainScreen(terminal, hardwareCursor);
 	const transcript = new Container();
-	// The transcript's first line, which scrolls away with it: "new conversation #8", or where a fork came from.
-	const heading = new Text("", 1, 0);
-	const log = new Container();
-	log.addChild(heading);
-	log.addChild(transcript);
-	const notices = new Text("", 1, 0);
 	// A blank line between the transcript and what's under it, as pi leaves one.
 	const gap = new Spacer(1);
 	const footer = new Footer(process.env.HOME);
@@ -148,9 +142,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	);
 	asPicker(editor);
 	const working = new WorkingLine(tui, editor);
-	const components = [log, gap, notices, editor, footer];
+	const components = [transcript, gap, editor, footer];
 	for (const component of components) tui.addChild(component);
-	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(log, [gap, notices], editor, [footer]));
+	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [gap], editor, [footer]));
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
@@ -160,13 +154,27 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
 	let exitWhenIdle = false;
-	const noticeLines: string[] = [];
+	// The client's own lines, in the transcript of the conversation shown (`Notice`).
+	const notices: Notice[] = [];
+	/** Whether the last notice is a status, which the next status replaces if nothing came between, as in pi. */
+	let lastIsStatus = false;
 
-	const notify = (line: string) => {
-		noticeLines.push(...line.split("\n"));
-		notices.setText(noticeLines.slice(-8).join("\n"));
-		tui.requestRender();
+	/**
+	 * A line in the transcript, after its newest message, which scrolls away with it. A
+	 * `status` (dim, passing news) replaces the status just before it, if nothing came
+	 * between, as pi's `showStatus` does: Alt+Up twice shows one line, not two.
+	 */
+	const notify = (line: string, kind: "status" | "other" = "other") => {
+		const entries = view?.items.flatMap((item) => (item.kind === "entry" ? [item.entry.id] : [])) ?? [];
+		const after = entries.at(-1);
+		const notice: Notice = { after, component: new Text(line, 1, 1) };
+		const last = notices.at(-1);
+		if (kind === "status" && lastIsStatus && last?.after === after) notices[notices.length - 1] = notice;
+		else notices.push(notice);
+		lastIsStatus = kind === "status";
+		render();
 	};
+	const status = (line: string) => notify(dim(line), "status");
 	const live = () => (view?.docs["pi.live"] ?? {}) as LiveState;
 	const busy = () => live().run !== undefined;
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
@@ -192,8 +200,14 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		return contextWindow?.tokens;
 	};
 	const render = () => {
-		if (view === undefined) return;
-		fillTranscript(transcript, view, rendered, style);
+		if (view === undefined) {
+			// Before the first view (the daemon refused to attach): the notices by themselves.
+			transcript.clear();
+			for (const notice of notices) transcript.addChild(notice.component);
+			tui.requestRender();
+			return;
+		}
+		fillTranscript(transcript, view, rendered, style, notices);
 		editor.borderColor = editorBorder((view.docs["pi.agent"] as AgentState | undefined)?.thinkingLevel);
 		working.update(busy() && client.connected);
 		footer.update(footerState(view, windowOf(view)), statusText(conversation.number, client.connected));
@@ -230,20 +244,26 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		if (conversation.id !== before) {
 			rendered.clear();
 			style.clear();
+			// Each conversation's transcript has its own notices; the last one's go with it.
+			notices.length = 0;
+			lastIsStatus = false;
 			// The daemon sends the view before its reply, so `view` is this conversation's now.
 			fillHistory(editor, userMessages());
 			// The footer says which conversation; a new one, or a fork, says so at the top of
 			// its transcript, which scrolls away as it grows.
 			const forked = forkedFrom === undefined ? "" : `, forked from #${forkedFrom}`;
-			heading.setText(
-				created || forkedFrom !== undefined ? dim(`new conversation #${conversation.number}${forked}`) : "",
-			);
+			if (created || forkedFrom !== undefined) {
+				notices.push({
+					after: undefined,
+					component: new Text(dim(`new conversation #${conversation.number}${forked}`), 1, 0),
+				});
+			}
 		}
 		forkedFrom = undefined;
 		// The view can arrive before the reply that carries the number.
 		render();
 	};
-	/** The conversation the next attach was forked from, for its heading. */
+	/** The conversation the next attach was forked from, for its first line. */
 	let forkedFrom: number | undefined;
 
 	const submit = async (text: string, whenBusy: "steer" | "followUp") => {
@@ -286,7 +306,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				}
 			}
 			watchConnection(client);
-			notify(dim(`reconnected to #${conversation.number}`));
+			status(`reconnected to #${conversation.number}`);
 			render();
 			// The view can arrive before `client` is the new connection, which `fillGaps` waits for.
 			fillGaps();
@@ -399,7 +419,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				});
 				const before = current().thinkingLevel;
 				if (thinkingLevel !== undefined && before !== undefined && thinkingLevel !== before) {
-					notify(dim(`${found.id} can't think at ${before}; thinking at ${thinkingLevel}`));
+					status(`${found.id} can't think at ${before}; thinking at ${thinkingLevel}`);
 				}
 				return;
 			}
@@ -408,7 +428,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				return;
 			case "compact":
 				await client.request("compact", argument === "" ? {} : { instructions: argument });
-				notify(dim("compacting in the background"));
+				status("compacting in the background");
 				return;
 			case "thinking": {
 				if (argument === "") return pick(name);
@@ -420,7 +440,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 					thinkingLevel: argument as ModelThinkingLevel,
 				});
 				if (thinkingLevel !== undefined && thinkingLevel !== argument) {
-					notify(dim(`this model can't think at ${argument}; thinking at ${thinkingLevel}`));
+					status(`this model can't think at ${argument}; thinking at ${thinkingLevel}`);
 				}
 				return;
 			}
@@ -433,7 +453,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				return;
 			case "exit":
 				exitWhenIdle = true;
-				if (busy()) notify(dim("leaving once the run ends; Ctrl+C leaves now"));
+				if (busy()) status("leaving once the run ends; Ctrl+C leaves now");
 				else leaving?.(0);
 				return;
 			default:
@@ -448,11 +468,11 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const dequeue = async () => {
 		const { texts } = await client.request("dequeue", {});
 		if (texts.length === 0) {
-			notify(dim("no queued messages to restore"));
+			status("no queued messages to restore");
 			return;
 		}
 		editor.setText([...texts, editor.getText()].filter((text) => text.trim() !== "").join("\n\n"));
-		notify(dim(`restored ${texts.length} queued message${texts.length === 1 ? "" : "s"} to the editor`));
+		status(`restored ${texts.length} queued message${texts.length === 1 ? "" : "s"} to the editor`);
 	};
 
 	/** Open `/name`'s menu, for its argument to be picked. */
@@ -563,7 +583,7 @@ function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 }
 
 /**
- * The transcript scrolling above a dock that keeps the notices, the editor and the footer
+ * The transcript scrolling above a dock that keeps the editor and the footer
  * in view, as pi's `createChatViewport` lays them out (not exported in 1.5.2).
  */
 export function chatLayout(
@@ -693,16 +713,38 @@ export class TranscriptStyle {
 }
 
 /**
+ * A line of the client's own in the transcript ("restored 2 queued messages", an error),
+ * after the entry that was newest when it appeared, so it scrolls away with the rest.
+ */
+export interface Notice {
+	/** The newest entry shown when it appeared; undefined before any. */
+	readonly after: EntryId | undefined;
+	readonly component: Component;
+}
+
+/**
  * Fill `transcript` with `view`'s entries and live state, reusing the components in
- * `rendered` for entries drawn before: entries never change once stored.
+ * `rendered` for entries drawn before: entries never change once stored. `notices` go
+ * after the entries they came after, in the order they came, and before what's live.
  */
 export function fillTranscript(
 	transcript: Container,
 	view: TranscriptView,
 	rendered: Map<EntryId, Component>,
 	style: TranscriptStyle,
+	notices: readonly Notice[] = [],
 ): void {
 	transcript.clear();
+	// Entries come in id order, and notices in the order they came: before each entry go
+	// the notices that appeared before it existed.
+	let next = 0;
+	const noticesBefore = (id: EntryId | undefined) => {
+		for (; next < notices.length; next++) {
+			const notice = notices[next] as Notice;
+			if (id !== undefined && notice.after !== undefined && notice.after >= id) return;
+			transcript.addChild(notice.component);
+		}
+	};
 	const { tools } = style;
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	// The context the last model response so far was sent with: what a compaction after it summarized.
@@ -728,6 +770,7 @@ export function fillTranscript(
 		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
 		else if (item.kind === "gap") transcript.addChild(new Text(dim("… loading the messages missed"), 1, 0));
 		else {
+			noticesBefore(item.entry.id);
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
 				component = renderEntry(item.entry, style, context);
@@ -739,6 +782,8 @@ export function fillTranscript(
 			transcript.addChild(component);
 		}
 	}
+	// Those after the newest entry, before what's live (the streaming response, what's queued).
+	noticesBefore(undefined);
 	tools.follow(live);
 	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, style)) {
 		transcript.addChild(component);

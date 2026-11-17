@@ -26,7 +26,10 @@ builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 Alt+Enter queues a follow-up, and Alt+Up takes what's queued back into the editor; Esc
 stops the run; Ctrl+C on an empty editor leaves, and the run carries on. Up in an empty
 editor recalls the conversation's earlier messages, from every session, as in pi. When
-the daemon restarts, the client reconnects and carries on where it left off.
+the daemon restarts, the client reconnects and carries on where it left off. Queued
+messages stay above the editor until the run takes them in; the client's own lines
+("new conversation #3", "restored 2 queued messages to the editor", errors) go into
+the transcript, and scroll away with it.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:
@@ -37,7 +40,9 @@ argument is picked from a menu of its own, with the arrows and Enter:
 - `/fork`: one of your messages. A new conversation starts with the history before it,
   and the message goes back into the editor, as pi's `/fork` does.
 - `/tree`: the conversation's family of forks, from the root down, to switch between.
-  Each branch is a conversation of its own, with its own Claude Code prompt cache: going
+  A fork is shown by its first message of its own, with how many it has, its newest,
+  and when it was last used. A fork from before the first message belongs to the family
+  too. Each branch is a conversation of its own, with its own Claude Code prompt cache: going
   back to one reads its context from the cache (99.8%, by hand on 2026-11-16), as long
   as it's been idle under the hour pi-claude-code's cache entries last.
 

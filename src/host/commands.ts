@@ -194,15 +194,18 @@ export function commandCompletions(source: CommandSource): CombinedAutocompleteP
 	complete("tree", async (prefix) => {
 		const current = source.current().number;
 		if (current === undefined) return null;
+		const now = Date.now();
 		return items(
 			family(await source.conversations(), current),
 			prefix,
-			({ summary }) => `${summary.number} ${summary.title ?? ""}`,
+			({ summary }) => `${summary.number} ${summary.title ?? ""} ${summary.branch ?? ""} ${summary.latest ?? ""}`,
+			// pi-tui's menu cuts its first column at 32 characters: the tree's lines and numbers
+			// there, the messages in the second.
 			({ summary, depth }) => ({
 				value: String(summary.number),
-				label: `${depth === 0 ? "" : `${"  ".repeat(depth - 1)}└ `}#${summary.number}  ${oneLine(summary.title ?? "(empty)", 50)}`,
-				description: [summary.number === current ? "current" : undefined, summary.busy ? "working" : undefined]
-					.filter((part) => part !== undefined)
+				label: `${depth === 0 ? "" : `${"  ".repeat(depth - 1)}└ `}#${summary.number}`,
+				description: [treeLabel(summary), treeDescription(summary, current, now)]
+					.filter((part) => part !== "")
 					.join(" · "),
 			}),
 		);
@@ -210,6 +213,40 @@ export function commandCompletions(source: CommandSource): CombinedAutocompleteP
 	// pi's file completion (`@`, and Tab) needs `fd`, which pier doesn't fetch as pi does:
 	// without it, the provider still completes paths from a directory listing.
 	return new CombinedAutocompleteProvider(commands, source.cwd, null);
+}
+
+/**
+ * A conversation in `/tree`, by what sets it apart: a fork by its first message of its
+ * own (all of one conversation's forks share its first message), the root by its first.
+ */
+export function treeLabel(summary: ConversationSummary): string {
+	if (summary.parent === undefined) return oneLine(summary.title ?? "(empty)", 50);
+	return summary.branch === undefined ? "(forked, nothing sent yet)" : `→ ${oneLine(summary.branch, 48)}`;
+}
+
+/** What else `/tree` says of a conversation: its own messages, its newest, how long ago, and whether it's the one shown. */
+export function treeDescription(summary: ConversationSummary, current: number, now: number): string {
+	const own = summary.ownMessages;
+	return [
+		summary.number === current ? "current" : undefined,
+		summary.busy ? "working" : undefined,
+		own === undefined || own < 2 ? undefined : `${own} messages`,
+		summary.latest !== undefined && summary.latest !== summary.branch && summary.latest !== summary.title
+			? `latest: ${oneLine(summary.latest, 40)}`
+			: undefined,
+		summary.active === undefined ? undefined : ago(now - summary.active),
+	]
+		.filter((part) => part !== undefined)
+		.join(" · ");
+}
+
+/** "3m ago", "2h ago", "4d ago". */
+function ago(ms: number): string {
+	const minutes = Math.max(0, Math.round(ms / 60_000));
+	if (minutes < 1) return "just now";
+	if (minutes < 60) return `${minutes}m ago`;
+	const hours = Math.round(minutes / 60);
+	return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
 /** pi-tui's editor opens its menu as a key does with this; private in its types, a method in its code. */
