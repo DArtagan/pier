@@ -45,8 +45,9 @@ themes:
   entries. A gap left by a long outage fills itself.
 - **Live state:** the streaming answer, running tools with the last 6 lines of output,
   retries, compactions, queued input, and why a run failed.
-- **The status line:** working or ready, model, thinking level, tokens, `#number`,
-  directory.
+- **The footer,** under the editor, as pi's: working or ready, `#number` and the
+  directory; token totals, cost, the context gauge, model and thinking level; and the
+  Claude plan's 5-hour and 7-day windows, as pi-quotas shows them.
 - **Keys:** Enter sends, and steers while a run is going; Alt+Enter or Ctrl+Shift+Enter
   queues a follow-up; Esc stops the run; Ctrl+C clears the editor, or leaves when it's
   empty, as Ctrl+D does.
@@ -54,7 +55,7 @@ themes:
   `/thinking`, `/detach`, `/quit`, `/exit`, `/help`.
 - **Reconnecting** (landed 2026-11-16): when the connection drops, the client retries
   (250 ms, doubling to 2 s) until the daemon is back, then reattaches and resumes the
-  transcript with only what it missed. The status line says `reconnecting…`; text sent
+  transcript with only what it missed. The footer says `reconnecting…`; text sent
   meanwhile stays in the editor; Ctrl+C leaves. It gives up only when the daemon
   refuses (another protocol version, or the conversation is gone).
 
@@ -228,11 +229,33 @@ In the order Will chose (below).
 - **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
   Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
   be placeholders there.
-- **A footer:** cost, context used against the model's window, and the Claude plan's
-  5-hour and 7-day windows. pi's `FooterComponent` takes classic pi's `AgentSession`,
-  so pier would draw its own. Cost and tokens are in `pi.usage`. Unchecked: whether
-  pi-claude-code passes the plan windows on, in its `claude-code.rate-limit`
-  diagnostic on each answer.
+- **A footer: done** (2026-11-16, `src/host/footer.ts`). pi's `FooterComponent` takes
+  classic pi's `AgentSession`, so pier draws its own, laid out as pi's and placed as
+  pi's `createChatViewport` places it, under the editor:
+  - `ready · #3 · ~/repositories/pier`: what the client is doing (it replaced pier's
+    status line), the conversation, the directory.
+  - `↑12 ↓3.4k R250k W9.0k $0.140 (sub) 25.5%/200k`, then the model and thinking level
+    on the right: pi's token totals (from `pi.usage`, every model the conversation
+    used), its cost with pi's "(sub)" for a subscription, and its context gauge, amber
+    past 70% and red past 90%. The context is the last answer's, as pi's; "?" after a
+    compaction until the next answer, as pi's. The model's window comes from a new
+    `model` request (protocol 4): the daemon's catalog knows it, the client doesn't.
+  - `5h:86% left (↺in 2h 5m) 7d:92% left (↺in 6d 6h 5m)`: the plan, worded as pi-quotas
+    words it in Will's classic pi, amber from 80% used and red from 90%, and "on usage
+    credits" in red if a turn was charged to them.
+
+  Checked first: pi-claude-code does pass the plan's windows on. Its
+  `claude-code.rate-limit` diagnostic carries Claude Code's `rate_limit_event`, with
+  `unifiedWindows.five_hour` and `.seven_day` (`utilization` 0 to 1, `resetsAt` in
+  seconds). Read from the live store, read only, 2026-11-16: 202 of 208 recent answers
+  had it. Missing, by design: pi-quotas' per-model 7-day windows and its pace warnings,
+  which come from Anthropic's API rather than Claude Code.
+
+  By hand in tmux with real Claude, the same day: the footer read `$0.000 (sub)
+  ?/1.0M` before the first answer (the daemon reported 1M for Opus 5.5), then
+  `↑2 ↓14 R1.2k W995 $0.008 (sub) 0.2%/1.0M … claude-opus-5-5 • high` and
+  `5h:85% left (↺in 3h 21m) 7d:92% left (↺in 6d 7h 21m)`; at 50 columns in regular mode
+  each line was cut to fit.
 
 ### Third: pi's habits
 

@@ -20,7 +20,7 @@ import type {
 } from "@earendil-works/pi-durable";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Which conversation `attach` opens. */
 export type AttachTarget =
@@ -69,6 +69,11 @@ export interface Methods {
 	abort: { params: Record<string, never>; result: Record<string, never> };
 	compact: { params: { instructions?: string }; result: { task: TaskId } };
 	configure: { params: { thinkingLevel?: ModelThinkingLevel }; result: Record<string, never> };
+	/**
+	 * What the client can't see of a model: its context window, from the daemon's model
+	 * catalog, for the footer's context gauge. Undefined for a model the daemon doesn't know.
+	 */
+	model: { params: { provider: string; modelId: string }; result: { contextWindow?: number } };
 	/** Conversations, newest first, in one directory if `cwd` is given. */
 	list: { params: { cwd?: string; limit?: number }; result: { conversations: ConversationSummary[] } };
 	/**

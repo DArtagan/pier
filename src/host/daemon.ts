@@ -231,6 +231,10 @@ class ConversationAccess {
 		this.#options = options;
 	}
 
+	get models(): Models {
+		return this.#options.models;
+	}
+
 	async open(
 		target: AttachTarget,
 		cwd: string,
@@ -371,6 +375,11 @@ class Connection {
 				return {};
 			case "list":
 				return { conversations: await this.#conversations.list(request.params) };
+			case "model": {
+				const { provider, modelId } = request.params;
+				const contextWindow = this.#conversations.models.getModel(provider, modelId)?.contextWindow;
+				return contextWindow === undefined ? {} : { contextWindow };
+			}
 			case "submit": {
 				const { text, whenBusy } = request.params;
 				const submission = await this.#conversation().submit(

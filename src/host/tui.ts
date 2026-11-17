@@ -1,4 +1,4 @@
-// The terminal client: a transcript, a status line and an editor, attached to one
+// The terminal client: a transcript, notices, an editor and a footer, attached to one
 // conversation in the daemon. Deliberately thin; see docs/history.md, "The thin slice".
 // Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
 // terminal's own scrollback, as pi's flag does.
@@ -21,7 +21,6 @@ import type {
 	InboxState,
 	LiveState,
 	TranscriptView,
-	UsageState,
 } from "@earendil-works/pi-durable";
 import {
 	type Component,
@@ -40,6 +39,7 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
+import { Footer, footerState } from "./footer.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
 import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
 
@@ -107,11 +107,13 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const tui = options.mode === "fullscreen" ? fullscreen(terminal) : new TuiMainScreen(terminal);
 	const transcript = new Container();
 	const notices = new Text("", 1, 0);
-	const status = new Text("", 1, 0);
+	const footer = new Footer(process.env.HOME);
+	// The context window of the conversation's model, from the daemon, for the footer's gauge.
+	let contextWindow: { model: string; tokens: number | undefined } | undefined;
 	const editor = new Editor(tui, { borderColor: dim, selectList: getSelectListTheme() });
-	const components = [transcript, notices, status, editor];
+	const components = [transcript, notices, editor, footer];
 	for (const component of components) tui.addChild(component);
-	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices, status], editor));
+	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices], editor, [footer]));
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
@@ -132,10 +134,30 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const busy = () => live().run !== undefined;
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
 
+	/** The model's context window, asked of the daemon once per model; undefined until it answers. */
+	const windowOf = (shown: TranscriptView): number | undefined => {
+		const model = (shown.docs["pi.agent"] as AgentState | undefined)?.model;
+		if (model === undefined) return undefined;
+		const key = `${model.provider}/${model.modelId}`;
+		if (contextWindow?.model !== key && client.connected) {
+			contextWindow = { model: key, tokens: undefined };
+			void client
+				.request("model", { provider: model.provider, modelId: model.modelId })
+				.then((result) => {
+					if (contextWindow?.model === key) contextWindow = { model: key, tokens: result.contextWindow };
+					render();
+				})
+				.catch(() => {
+					// Asked again with the next view.
+					if (contextWindow?.model === key) contextWindow = undefined;
+				});
+		}
+		return contextWindow?.tokens;
+	};
 	const render = () => {
 		if (view === undefined) return;
 		fillTranscript(transcript, view, rendered, style);
-		status.setText(statusLine(view, conversation.number, client.connected));
+		footer.update(footerState(view, windowOf(view)), statusText(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
 	};
@@ -378,10 +400,15 @@ function fullscreen(terminal: Terminal): TuiAltScreen {
 }
 
 /**
- * The transcript scrolling above a dock that keeps the status and the editor in view, as
- * pi's `createChatViewport` lays them out (not exported in 1.5.2).
+ * The transcript scrolling above a dock that keeps the notices, the editor and the footer
+ * in view, as pi's `createChatViewport` lays them out (not exported in 1.5.2).
  */
-export function chatLayout(transcript: Component, above: readonly Component[], editor: Component): Component {
+export function chatLayout(
+	transcript: Component,
+	above: readonly Component[],
+	editor: Component,
+	below: readonly Component[] = [],
+): Component {
 	const scrolling = new ScrollView(transcript, {
 		follow: "end",
 		primary: true,
@@ -391,6 +418,7 @@ export function chatLayout(transcript: Component, above: readonly Component[], e
 	const dock = new VStack([
 		...above.map((component) => ({ component, shrink: 1, minSize: 0 })),
 		{ component: editor, shrink: 1, minSize: 3 },
+		...below.map((component) => ({ component, shrink: 1, minSize: 0 })),
 	]);
 	return new VStack([
 		{ component: scrolling, basis: 0, grow: 1, shrink: 1, minSize: 1 },
@@ -673,24 +701,11 @@ export function summaryLine(summary: ConversationSummary, withDirectory: boolean
 	return `${bold(`#${summary.number}`)}  ${summary.title ?? dim("(empty)")}${dim(`${summary.busy ? "  working" : ""}${where}`)}`;
 }
 
-function statusLine(view: TranscriptView, number: number | undefined, connected: boolean): string {
-	const agent = (view.docs["pi.agent"] ?? {}) as AgentState;
-	const usage = (view.docs["pi.usage"] ?? { models: {} }) as UsageState;
-	let tokens = 0;
-	for (const entry of Object.values(usage.models ?? {}))
-		tokens += entry.input + entry.output + entry.cacheRead + entry.cacheWrite;
+/** The footer's first words: what the client is doing, and which conversation. */
+function statusText(view: TranscriptView, number: number | undefined, connected: boolean): string {
 	const working = (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
-	const model = agent.model ? `${agent.model.provider}/${agent.model.modelId}` : "default model";
-	return dim(
-		[
-			!connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready",
-			model,
-			`thinking ${agent.thinkingLevel ?? "default"}`,
-			`${Math.round(tokens / 1000)}k tokens`,
-			`#${number ?? "?"}`,
-			agent.cwd ?? "",
-		].join(" · "),
-	);
+	const doing = !connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready";
+	return `${doing}${dim(` · #${number ?? "?"}`)}`;
 }
 
 function textParts(content: readonly { type: string; text?: string }[] | string): string {

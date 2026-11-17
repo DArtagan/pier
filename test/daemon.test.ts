@@ -352,6 +352,15 @@ describe("daemon", () => {
 		).rejects.toThrow(/already listening/);
 	});
 
+	it("tells a client a model's context window, for its footer", async () => {
+		await start([]);
+		const { client: connected } = await client();
+		expect(await connected.request("model", { provider: "faux", modelId: "faux-1" })).toEqual({
+			contextWindow: faux.provider.getModels()[0]?.contextWindow,
+		});
+		expect(await connected.request("model", { provider: "faux", modelId: "nowhere" })).toEqual({});
+	});
+
 	it("rejects requests before attaching", async () => {
 		await start([]);
 		const { client: connected } = await client();
