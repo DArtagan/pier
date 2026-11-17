@@ -4,6 +4,29 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["**", "!**/node_modules", "!**/dist", "!**/.devenv", "!**/.direnv"]
+		"includes": ["**", "!**/node_modules", "!**/dist", "!**/.devenv", "!**/.direnv", "!**/.worktrees"]
+	},
+	"linter": {
+		"rules": {
+			"correctness": {
+				"noUndeclaredDependencies": "error"
+			},
+			"nursery": {
+				"noFloatingPromises": "error",
+				"noMisusedPromises": "error",
+				"useExhaustiveSwitchCases": "error"
+			},
+			"style": {
+				"noNonNullAssertion": "error",
+				"noParameterAssign": "error",
+				"useThrowNewError": "error"
+			},
+			"suspicious": {
+				"noImportCycles": "error",
+				"noShadow": "error",
+				"noUnnecessaryConditions": "error",
+				"useErrorMessage": "error"
+			}
+		}
 	}
 }

@@ -4,6 +4,11 @@
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
 		"strict": true,
+		"exactOptionalPropertyTypes": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitOverride": true,
+		"noImplicitReturns": true,
+		"noUncheckedIndexedAccess": true,
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
 		"rewriteRelativeImportExtensions": true,
@@ -12,5 +17,5 @@
 		"skipLibCheck": true,
 		"types": ["node"]
 	},
-	"include": ["src", "test", "experiments"]
+	"include": ["src", "test", "experiments", "vitest.config.ts"]
 }

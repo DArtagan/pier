@@ -17,7 +17,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
 		"check": "tsc --noEmit",
-		"lint": "biome check src test experiments",
+		"lint": "biome check src test experiments vitest.config.ts",
 		"test": "vitest run",
 		"gate": "node experiments/gate/run.ts",
 		"pier": "node src/host/cli.ts"

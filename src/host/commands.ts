@@ -125,7 +125,7 @@ export function family(
 /** pi's autocomplete, with pier's commands and their arguments' completions. */
 export function commandCompletions(source: CommandSource): CombinedAutocompleteProvider {
 	const commands = COMMANDS.map((command): SlashCommand => ({ ...command }));
-	const complete = (name: string, completions: SlashCommand["getArgumentCompletions"]) => {
+	const complete = (name: string, completions: NonNullable<SlashCommand["getArgumentCompletions"]>) => {
 		const command = commands.find((each) => each.name === name);
 		if (command !== undefined) command.getArgumentCompletions = completions;
 	};

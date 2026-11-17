@@ -8,7 +8,8 @@
 
   languages = {
     nix.enable = true;
-    # Pinned to the pi version nixpkgs ships (package.json); its node_modules come from npm.
+    # Node 24, as package.json's engines. The packages, pi's included, come from npm through
+    # package-lock.json, whatever pi version nixpkgs ships (README, "Versions").
     javascript = {
       enable = true;
       package = pkgs.nodejs_24;
@@ -20,7 +21,12 @@
   };
 
   git-hooks.hooks = {
+    actionlint.enable = true;
     biome.enable = true;
+    check-added-large-files.enable = true;
+    check-json.enable = true;
+    check-merge-conflicts.enable = true;
+    check-yaml.enable = true;
     # release-please derives every version and changelog entry from these.
     convco.enable = true;
     deadnix.enable = true;
@@ -31,6 +37,7 @@
     };
     nixfmt.enable = true;
     shellcheck.enable = true;
+    shfmt.enable = true;
     statix.enable = true;
     trim-trailing-whitespace = {
       enable = true;

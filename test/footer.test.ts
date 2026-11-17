@@ -22,7 +22,7 @@ const rateLimit = {
 };
 
 let id = 0;
-const response = (usage: Record<string, number> | undefined, diagnostics?: unknown[]) =>
+const response = (reported: Record<string, number> | undefined, diagnostics?: unknown[]) =>
 	({
 		id: ++id as EntryId,
 		kind: "pi.assistant",
@@ -31,7 +31,7 @@ const response = (usage: Record<string, number> | undefined, diagnostics?: unkno
 				role: "assistant",
 				content: [{ type: "text", text: "ok" }],
 				stopReason: "stop",
-				...(usage === undefined ? {} : { usage }),
+				...(reported === undefined ? {} : { usage: reported }),
 				...(diagnostics === undefined ? {} : { diagnostics }),
 			},
 		],

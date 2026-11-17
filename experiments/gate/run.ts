@@ -30,12 +30,12 @@ writeFileSync(
 
 const checks: { group: string; check: string; ok: boolean; detail?: string }[] = [];
 const check = (group: string, name: string, ok: boolean, detail?: string) => {
-	checks.push({ group, check: name, ok, detail });
+	checks.push({ group, check: name, ok, ...(detail === undefined ? {} : { detail }) });
 	console.log(
 		`${ok ? "PASS" : "FAIL"}  ${group}: ${name}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
 	);
 };
-const note = (text: string) => console.log(`      ${text}`);
+const note = (message: string) => console.log(`      ${message}`);
 const transcript: string[] = [];
 /** Groups whose host didn't exit by itself within its time limit, and was killed. */
 const hung: string[] = [];
@@ -104,11 +104,11 @@ function host(
 						process.kill(-pid, "SIGKILL");
 						// What a process-group kill alone leaves running, then what the cgroup
 						// kill takes too.
-						const alive = (line: string) => existsSync(`/proc/${line.split(" ")[0]}`);
+						const alive = (entry: string) => existsSync(`/proc/${entry.split(" ")[0]}`);
 						survivors.push(...new Set([...tree.filter(alive), ...processesIn(workspace)]));
-						for (const line of survivors) {
+						for (const survivor of survivors) {
 							try {
-								process.kill(Number(line.split(" ")[0]), "SIGKILL");
+								process.kill(Number(survivor.split(" ")[0]), "SIGKILL");
 							} catch {
 								// Already gone.
 							}
@@ -131,11 +131,11 @@ const answer = (result: Line | undefined) => result?.answer as Answer | undefine
 const text = (result: Line | undefined) => answer(result)?.text ?? "";
 const done = (result: Line | undefined) => result?.status === "done";
 const marked = (result: Line | undefined) => text(result).trimEnd().endsWith(MARKER);
-const turn = (conv: string, requestId: string, text: string): Extract<Step, { op: "turn" }> => ({
+const turn = (conv: string, requestId: string, prompt: string): Extract<Step, { op: "turn" }> => ({
 	op: "turn",
 	conv,
 	requestId,
-	text,
+	text: prompt,
 });
 const noTools = (question: string) => `Without using any tools: ${question}`;
 /** The share of an answer's input tokens read from the prompt cache. */
