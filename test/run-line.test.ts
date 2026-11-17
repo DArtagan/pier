@@ -1,12 +1,13 @@
-// The line after each turn, as pine-of-glass's cachemire draws it in Will's classic pi,
-// computed from what Durable stores; and pi's working line in the editor's border.
+// The line after each run, in Durable's terms, with the facts pine-of-glass's cachemire
+// prints in Will's classic pi, computed from what Durable stores; and pi's working line
+// in the editor's border.
 import { stripVTControlCharacters } from "node:util";
 import { CustomEditor, initTheme } from "@earendil-works/pi-coding-agent";
 import type { EntryId, EntryRecord } from "@earendil-works/pi-durable";
 import { getKeybindings } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { formatDuration, runEndingAt, runLine } from "../src/host/run-line.ts";
 import { installKeybindings } from "../src/host/tool-calls.ts";
-import { formatDuration, turnEndingAt, turnLine } from "../src/host/turn-line.ts";
 import { WorkingLine } from "../src/host/working.ts";
 
 let id = 0;
@@ -16,7 +17,8 @@ const user = (timestamp: number) =>
 		kind: "pi.user",
 		model: [{ role: "user", content: "go", timestamp }],
 	}) as unknown as EntryRecord;
-const answer = (
+/** A model response: with a tool call (the run goes on), or a final answer. */
+const response = (
 	timestamp: number,
 	durationMs: number,
 	tools: boolean,
@@ -45,37 +47,37 @@ const result = (timestamp: number) =>
 		model: [{ role: "toolResult", toolCallId: "c", toolName: "bash", content: [], isError: false, timestamp }],
 	}) as unknown as EntryRecord;
 
-describe("turn line", () => {
-	it("counts a turn's model calls and its time, from the user's message to the end of its answer", () => {
-		// As in Will's classic pi: two bash calls, then the answer; 3 calls in 3 s.
+describe("run line", () => {
+	it("counts a run's turns and its time, from the user's message to the end of its final answer", () => {
+		// Two turns with a bash call each, then the final answer: 3 turns in 3 s.
 		const entries = [
 			user(1000),
-			answer(1100, 900, true),
+			response(1100, 900, true),
 			result(2000),
-			answer(2010, 700, true),
+			response(2010, 700, true),
 			result(2710),
-			answer(2720, 1280, false),
+			response(2720, 1280, false),
 		];
-		const turn = turnEndingAt(entries, entries.length - 1);
-		expect(turn).toMatchObject({ calls: 3, durationMs: 3000, cacheRead: 21000, cacheWrite: 2700, output: 240 });
-		if (turn === undefined) throw new Error("no turn");
-		expect(turnLine(turn)).toBe("turn: 3 calls · 3s · read 21.0k (100% cached) · wrote 2.7k · out 0.2k");
+		const run = runEndingAt(entries, entries.length - 1);
+		expect(run).toMatchObject({ turns: 3, durationMs: 3000, cacheRead: 21000, cacheWrite: 2700, output: 240 });
+		if (run === undefined) throw new Error("no run");
+		expect(runLine(run)).toBe("run: 3 turns · 3s · read 21.0k (100% cached) · wrote 2.7k · out 0.2k");
 	});
 
-	it("draws no line mid-turn, after a failure, or when the turn's start isn't loaded", () => {
-		const entries = [user(0), answer(10, 10, true), result(20), answer(30, 10, false)];
-		expect(turnEndingAt(entries, 1)).toBeUndefined();
-		expect(turnEndingAt(entries.slice(1), 2)).toBeUndefined();
-		const failed = answer(40, 10, false);
+	it("draws no line mid-run, after a failure, or when the run's start isn't loaded", () => {
+		const entries = [user(0), response(10, 10, true), result(20), response(30, 10, false)];
+		expect(runEndingAt(entries, 1)).toBeUndefined();
+		expect(runEndingAt(entries.slice(1), 2)).toBeUndefined();
+		const failed = response(40, 10, false);
 		(failed.model?.[0] as { stopReason: string }).stopReason = "error";
-		expect(turnEndingAt([user(0), failed], 1)).toBeUndefined();
+		expect(runEndingAt([user(0), failed], 1)).toBeUndefined();
 	});
 
-	it("words a single call and a long turn as cachemire does", () => {
-		const entries = [user(0), answer(0, 161_000, false, { input: 500, cacheRead: 0, cacheWrite: 0, output: 4200 })];
-		const turn = turnEndingAt(entries, 1);
-		if (turn === undefined) throw new Error("no turn");
-		expect(turnLine(turn)).toBe("turn: 1 call · 2m41s · read 0.0k (0.0% cached) · wrote 0.0k · out 4.2k");
+	it("words a run of one turn, and a long run, with cachemire's numbers", () => {
+		const entries = [user(0), response(0, 161_000, false, { input: 500, cacheRead: 0, cacheWrite: 0, output: 4200 })];
+		const run = runEndingAt(entries, 1);
+		if (run === undefined) throw new Error("no run");
+		expect(runLine(run)).toBe("run: 1 turn · 2m41s · read 0.0k (0.0% cached) · wrote 0.0k · out 4.2k");
 		expect(formatDuration(3_900_000)).toBe("1h5m");
 	});
 });

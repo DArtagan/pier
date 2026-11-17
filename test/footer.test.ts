@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { color } from "../src/host/colors.ts";
 import { footerLines, footerState, formatCwd, formatTimeRemaining, planWindows } from "../src/host/footer.ts";
 
-// As pi-claude-code passed it on, on an answer of Will's (2026-11-16).
+// As pi-claude-code passed it on, on a model response of Will's (2026-11-16).
 const rateLimit = {
 	status: "allowed",
 	resetsAt: 1794888000,
@@ -22,7 +22,7 @@ const rateLimit = {
 };
 
 let id = 0;
-const answer = (usage: Record<string, number> | undefined, diagnostics?: unknown[]) =>
+const response = (usage: Record<string, number> | undefined, diagnostics?: unknown[]) =>
 	({
 		id: ++id as EntryId,
 		kind: "pi.assistant",
@@ -87,7 +87,7 @@ describe("footer", () => {
 
 	it("lays out pi's two lines, and the plan's windows as pi-quotas words them", () => {
 		const state = footerState(
-			view([answer(usage, [{ type: "claude-code.rate-limit", timestamp: 0, details: rateLimit }])]),
+			view([response(usage, [{ type: "claude-code.rate-limit", timestamp: 0, details: rateLimit }])]),
 			200000,
 		);
 		const lines = plain(footerLines(state, 100, { home: "/home/will", status: "ready · #3", now: NOW }));
@@ -97,31 +97,37 @@ describe("footer", () => {
 		expect(lines[2]).toBe("5h:86% left (↺in 2h 5m) 7d:92% left (↺in 6d 6h 5m)");
 	});
 
-	it("says ? for the context after a compaction, until the next answer, as pi does", () => {
-		const compacted = footerState(view([answer(usage), compaction()]), 200000);
+	it("says ? for the context after a compaction, until the next model response, as pi does", () => {
+		const compacted = footerState(view([response(usage), compaction()]), 200000);
 		expect(compacted.context).toBeUndefined();
 		expect(plain(footerLines(compacted, 100))[1]).toContain(" ?/200k");
-		const answered = footerState(view([answer(usage), compaction(), answer({ ...usage, totalTokens: 20000 })]), 200000);
+		const answered = footerState(
+			view([response(usage), compaction(), response({ ...usage, totalTokens: 20000 })]),
+			200000,
+		);
 		expect(answered.context).toBe(20000);
 	});
 
 	it("turns the gauge and a window amber, then red, as they fill", () => {
-		const nearlyFull = footerState(view([answer({ ...usage, totalTokens: 190000 })]), 200000);
+		const nearlyFull = footerState(view([response({ ...usage, totalTokens: 190000 })]), 200000);
 		expect(footerLines(nearlyFull, 100)[1]).toContain(color("error", "95.0%/200k"));
 		const filling = {
 			...rateLimit,
 			unifiedWindows: { five_hour: { utilization: 0.85, resetsAt: 1794888000, status: "allowed" } },
 		};
-		const amber = footerState(view([answer(usage, [{ type: "claude-code.rate-limit", details: filling }])]), 200000);
+		const amber = footerState(view([response(usage, [{ type: "claude-code.rate-limit", details: filling }])]), 200000);
 		expect(footerLines(amber, 100, { now: NOW })[2]).toContain(color("warning", "15% left"));
 		const charged = { ...rateLimit, isUsingOverage: true };
-		const credits = footerState(view([answer(usage, [{ type: "claude-code.rate-limit", details: charged }])]), 200000);
+		const credits = footerState(
+			view([response(usage, [{ type: "claude-code.rate-limit", details: charged }])]),
+			200000,
+		);
 		expect(plain(footerLines(credits, 100, { now: NOW }))[2]).toContain("on usage credits");
 	});
 
 	it("draws the footer in pi's grey, and the plan's room left in green, as pi and pi-quotas do", () => {
 		const state = footerState(
-			view([answer(usage, [{ type: "claude-code.rate-limit", timestamp: 0, details: rateLimit }])]),
+			view([response(usage, [{ type: "claude-code.rate-limit", timestamp: 0, details: rateLimit }])]),
 			200000,
 		);
 		const lines = footerLines(state, 100, { home: "/home/will", status: "ready", now: NOW });
@@ -135,7 +141,7 @@ describe("footer", () => {
 	});
 
 	it("draws no plan line without the diagnostic, and fits a narrow terminal", () => {
-		const state = footerState(view([answer(usage)]), undefined);
+		const state = footerState(view([response(usage)]), undefined);
 		expect(plain(footerLines(state, 100))[1]).toContain(" ?/0 ");
 		const lines = plain(footerLines(state, 30));
 		expect(lines).toHaveLength(2);

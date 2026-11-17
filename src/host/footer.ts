@@ -3,7 +3,7 @@
 // pi's `FooterComponent` takes classic pi's `AgentSession`, so pier draws its own from
 // Durable's documents. A third line shows the Claude plan's windows, worded as
 // pi-quotas words them in Will's classic pi ("5h:86% left (↺in 2h 5m)"), from the
-// rate-limit diagnostic pi-claude-code puts on each answer.
+// rate-limit diagnostic pi-claude-code puts on each model response.
 import { relative, resolve, sep } from "node:path";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
@@ -24,12 +24,12 @@ export interface FooterState {
 	/** Summed over every model the conversation used. */
 	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	cost: number;
-	/** The context the last answer was sent with; undefined until there is one, or after a compaction. */
+	/** The context the last model response was sent with; undefined until there is one, or after a compaction. */
 	context?: number;
 	contextWindow?: number;
 	model?: { provider: string; modelId: string };
 	thinkingLevel?: string;
-	/** The plan's windows, from the newest answer that reported them. */
+	/** The plan's windows, from the newest model response that reported them. */
 	plan?: readonly PlanWindow[];
 	/** Charged to usage credits (extra usage) rather than the plan. */
 	overage?: boolean;
@@ -85,8 +85,8 @@ export function footerState(view: TranscriptView, contextWindow: number | undefi
 	}
 	let context: number | undefined;
 	let plan: { windows: PlanWindow[]; overage: boolean } | undefined;
-	// Newest first: the last answer's context, and the newest plan windows, unless a
-	// compaction came after it (then pi says "?" until the next answer, as pier does).
+	// Newest first: the last model response's context, and the newest plan windows, unless
+	// a compaction came after it (then pi says "?" until the next response, as pier does).
 	const items = view.items;
 	let compacted = false;
 	for (let index = items.length - 1; index >= 0; index--) {
@@ -95,19 +95,19 @@ export function footerState(view: TranscriptView, contextWindow: number | undefi
 		if (item.entry.kind === "pi.compaction" || item.entry.kind === "pi.reset") compacted = true;
 		const message = item.entry.model?.[0];
 		if (message?.role !== "assistant") continue;
-		const answer = message as AssistantMessage & { diagnostics?: { type: string; details?: unknown }[] };
+		const response = message as AssistantMessage & { diagnostics?: { type: string; details?: unknown }[] };
 		if (
 			context === undefined &&
 			!compacted &&
-			answer.usage !== undefined &&
-			answer.stopReason !== "error" &&
-			answer.stopReason !== "aborted"
+			response.usage !== undefined &&
+			response.stopReason !== "error" &&
+			response.stopReason !== "aborted"
 		) {
-			const used = calculateContextTokens(answer.usage);
+			const used = calculateContextTokens(response.usage);
 			if (used > 0) context = used;
 		}
 		if (plan === undefined) {
-			for (const diagnostic of answer.diagnostics ?? []) {
+			for (const diagnostic of response.diagnostics ?? []) {
 				if (diagnostic.type === "claude-code.rate-limit") plan = planWindows(diagnostic.details) ?? plan;
 			}
 		}
@@ -189,7 +189,8 @@ export function footerLines(
 	if (tokens.output) parts.push(`↓${formatTokens(tokens.output)}`);
 	if (tokens.cacheRead) parts.push(`R${formatTokens(tokens.cacheRead)}`);
 	if (tokens.cacheWrite) parts.push(`W${formatTokens(tokens.cacheWrite)}`);
-	// Claude Code runs on the plan, so this is what the turns would have cost, as pi's "(sub)" says.
+	// Claude Code runs on the plan, so this is what the conversation's model responses would
+	// have cost at API prices, as pi's "(sub)" says.
 	const subscription = state.model?.provider === "claude-code";
 	if (state.cost || subscription) parts.push(`$${state.cost.toFixed(3)}${subscription ? " (sub)" : ""}`);
 	const window = state.contextWindow ?? 0;

@@ -181,14 +181,16 @@ wait in `todos/tui.md`. What it took, and what it found:
   and failed on CI, which has no `COLORTERM`; the tests now pin 24-bit, 256 colors and a
   terminal that never answers.
 - **The footer** (#11). pi-claude-code passes Claude Code's `rate_limit_event` on, with
-  the plan's 5-hour and 7-day windows (202 of 208 answers had it, read from the live
-  store). Its dollar figure is what the turns would cost at Anthropic's API prices
-  (pi-ai's price list), not a charge: "(sub)", as pi says.
+  the plan's 5-hour and 7-day windows (202 of 208 model responses had it, read from the
+  live store). Its dollar figure is what the model responses would cost at Anthropic's
+  API prices (pi-ai's price list), not a charge: "(sub)", as pi says.
 - **Polish** (Will's review, the same day): pi's working line in the editor's border, a
-  turn line after each run, pi's colors for the footer and the editor's lines, no
-  notices on attaching, and a blank line above the editor. The turn line is from
-  pine-of-glass's cachemire, an extension of Will's classic pi, found by running pi in
-  tmux; pier computes it from Durable's stored answers.
+  run line after each run, pi's colors for the footer and the editor's lines, no
+  notices on attaching, and a blank line above the editor. The run line has the facts
+  of pine-of-glass's cachemire, an extension of Will's classic pi, found by running pi
+  in tmux; pier computes them from Durable's stored model responses. cachemire wrote
+  `turn: 3 calls`; pier writes `run: 3 turns`, in Durable's terms (Will: *"Let's make
+  these all match Durable's terms"*).
 
 pi exports none of its theme instance, theme controller, working indicator, app keymap
 or tool renderers in 1.5.2. pier imports the first two from pi's `dist/` by path

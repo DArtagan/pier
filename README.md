@@ -38,21 +38,26 @@ It looks like pi, as it's drawn by pi's components, in pi's theme, with your `th
 the terminal's own cursor in the editor, so a pane that loses focus shows none, or a
 hollow one when the terminal's window does):
 
-- **Answers** with their thinking (Ctrl+T hides it), **tool calls** in pi's coloured
-  blocks (grey while running, green done, red failed), with edits as diffs and long
-  output collapsed (Ctrl+O expands it), and **compaction summaries** (Ctrl+O too).
+- **Model responses** with their thinking (Ctrl+T hides it), **tool calls** in pi's
+  coloured blocks (grey while running, green done, red failed), with edits as diffs and
+  long output collapsed (Ctrl+O expands it), and **compaction summaries** (Ctrl+O too).
 - **pi's working line** in the editor's border while a run goes, and after each run a
-  **turn line**, as pine-of-glass's cachemire draws one: `◍ turn: 3 calls · 9s · read
-  5.8k (99.9% cached) · wrote 1.2k · out 0.1k`.
-- **A footer** as pi's: the conversation and directory; tokens, what the turns would
-  have cost at API prices ("(sub)": you're on the plan), the context used, the model
-  and thinking level; and the Claude plan's 5-hour and 7-day windows, as pi-quotas
-  shows them.
+  **run line**, with the facts pine-of-glass's cachemire prints: `◍ run: 3 turns · 9s ·
+  read 5.8k (99.9% cached) · wrote 1.2k · out 0.1k`.
+- **A footer** as pi's: the conversation and directory; tokens, what its model
+  responses would have cost at API prices ("(sub)": you're on the plan), the context
+  used, the model and thinking level; and the Claude plan's 5-hour and 7-day windows,
+  as pi-quotas shows them.
 - A long outage leaves no hole: the client loads what it missed. `/earlier` loads older
   messages.
 
 The terminal must answer pi's color query for tool blocks' backgrounds; a tmux pane no
 client is showing may not, and then they're blank.
+
+pier says what Durable says (its README, "Concepts"): a **turn** is one model response
+and its tool calls; a **run** is the turns from an input to its **final answer**, the
+response with no tool calls that ends it. A conversation is busy while a run is going.
+(pine-of-glass calls a run a "turn", and its turns "calls".)
 
 Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
 one conversation. Each conversation's tools run in its directory, with the environment

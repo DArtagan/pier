@@ -65,7 +65,7 @@ describe("fillTranscript", () => {
 
 	// Each update from the daemon refills the transcript; only the live state is drawn anew
 	// (experiments/transcript/bench.ts measures what that's worth).
-	it("reuses stored entries' components on each update, and draws the streamed answer anew", () => {
+	it("reuses stored entries' components on each update, and draws the streaming response anew", () => {
 		const transcript = new Container();
 		const rendered = new Map<EntryId, Component>();
 		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
@@ -149,19 +149,19 @@ describe("tool calls", () => {
 
 	it("shows a running call's output under its call, and stops its clock when the slot goes without a result", () => {
 		const tools = new ToolCalls(ui, "/tmp");
-		const answer = call("b2", "bash", { command: "sleep 20" });
+		const response = call("b2", "bash", { command: "sleep 20" });
 		const running = {
 			run: {},
 			tools: [{ callId: "b2", name: "bash", status: "running", output: "partial out" }],
 		} as unknown as LiveState;
-		const shown = fill(tools, [answer], running);
+		const shown = fill(tools, [response], running);
 		expect(shown).toContain("$ sleep 20");
 		expect(shown).toContain("partial out");
 		expect(shown).toContain("Elapsed");
 		expect(tools.running).toBe(1);
 		expect(vi.getTimerCount()).toBe(1);
 		// The run was aborted, or the tool's task faulted: the slot is gone, and no result came.
-		fill(tools, [answer], {});
+		fill(tools, [response], {});
 		expect(tools.running).toBe(0);
 		expect(vi.getTimerCount()).toBe(0);
 	});
@@ -180,13 +180,13 @@ describe("tool calls", () => {
 
 	it("draws a result whose call isn't loaded by itself, until the call is", () => {
 		const tools = new ToolCalls(ui, "/tmp");
-		const answer = call("r1", "read", { path: "/tmp/f.txt" });
+		const response = call("r1", "read", { path: "/tmp/f.txt" });
 		const stored = result("r1", "read", "file contents");
 		const transcript = new Container();
 		const rendered = new Map<EntryId, Component>();
 		fillTranscript(transcript, view([stored]), rendered, new TranscriptStyle(markdown, tools));
 		expect(show(transcript)).toContain("file contents");
-		fillTranscript(transcript, view([answer, stored]), rendered, new TranscriptStyle(markdown, tools));
+		fillTranscript(transcript, view([response, stored]), rendered, new TranscriptStyle(markdown, tools));
 		const shown = show(transcript);
 		expect(shown).toContain("read /tmp/f.txt");
 		// pi shows a read collapsed, without its contents.
@@ -239,7 +239,7 @@ describe("answers, thinking and summaries", () => {
 		expect(show(transcript)).toContain("The answer is 42.");
 	});
 
-	it("starts with thinking hidden when pi's hideThinkingBlock says so, the streaming answer too", () => {
+	it("starts with thinking hidden when pi's hideThinkingBlock says so, the streaming response too", () => {
 		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"), { hideThinking: true });
 		const streaming = {
 			run: {},
@@ -253,7 +253,7 @@ describe("answers, thinking and summaries", () => {
 		expect(show(transcript)).toContain("still weighing");
 	});
 
-	it("updates one component as an answer streams, and starts another for the next", () => {
+	it("updates one component as a response streams, and starts another for the next", () => {
 		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
 		const partial = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] }) as AssistantMessage;
 		const first = style.streaming(partial("Hel"));
@@ -262,7 +262,7 @@ describe("answers, thinking and summaries", () => {
 		expect(style.streaming(partial("Next"))).not.toBe(first);
 	});
 
-	it("marks user messages and answers as prompt zones, for Ctrl+Up and Ctrl+Down", () => {
+	it("marks user messages and model responses as prompt zones, for Ctrl+Up and Ctrl+Down", () => {
 		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
 		const user = entry(1, "pi.user", { role: "user", content: "what is it?" });
 		const lines = fill(style, [user, answer]).render(100).join("\n");
@@ -284,7 +284,7 @@ describe("answers, thinking and summaries", () => {
 			stopReason: "stop",
 			usage: { input: 10, output: 5, cacheRead: 145000, cacheWrite: 0, totalTokens: 145015 },
 		});
-		// With no answer before it loaded, pier can't say what it summarized: a rule, not "0 tokens".
+		// With no model response before it loaded, pier can't say what it summarized: a rule, not "0 tokens".
 		expect(show(fill(style, [compaction]))).toContain("earlier messages were summarized");
 		const transcript = fill(style, [used, compaction]);
 		expect(show(transcript)).toContain("[compaction]");
