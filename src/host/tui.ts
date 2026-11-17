@@ -470,6 +470,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		const { texts } = await client.request("dequeue", {});
 		if (texts.length === 0) return;
 		editor.setText([...texts, editor.getText()].filter((text) => text.trim() !== "").join("\n\n"));
+		// The daemon's answer comes after the key's frame: draw what it brought now.
+		tui.requestRender();
 	};
 
 	/** Open `/name`'s menu, for its argument to be picked. */
@@ -492,6 +494,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			if (text !== "") {
 				editor.addToHistory(text);
 				editor.setText("");
+				// `setText` doesn't redraw; without this the text stays until the next key.
+				tui.requestRender();
 				void submit(text, "followUp");
 			}
 			return { consume: true };
@@ -515,8 +519,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "ctrl+c") || matchesKey(data, "ctrl+d")) {
-			if (editor.getText() !== "") editor.setText("");
-			else leaving?.(0);
+			if (editor.getText() !== "") {
+				editor.setText("");
+				tui.requestRender();
+			} else leaving?.(0);
 			return { consume: true };
 		}
 		return undefined;
