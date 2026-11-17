@@ -112,7 +112,12 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const markdownTheme = getMarkdownTheme();
 
 	const terminal = new ProcessTerminal();
-	const tui = options.mode === "fullscreen" ? fullscreen(terminal) : new TuiMainScreen(terminal);
+	// pi's `showHardwareCursor` (or `PI_HARDWARE_CURSOR=1`): the terminal's own cursor in the
+	// editor rather than a drawn one, so the terminal shows it hollow, or not at all, when
+	// it isn't focused, as it does in pi. Will's is on.
+	const hardwareCursor = options.settings?.getShowHardwareCursor() ?? false;
+	const tui =
+		options.mode === "fullscreen" ? fullscreen(terminal, hardwareCursor) : new TuiMainScreen(terminal, hardwareCursor);
 	const transcript = new Container();
 	const notices = new Text("", 1, 0);
 	// A blank line between the transcript and what's under it, as pi leaves one.
@@ -411,10 +416,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 }
 
 /** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported in 1.5.2). */
-function fullscreen(terminal: Terminal): TuiAltScreen {
+function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 	const bottom = getKeybindings().getKeys("tui.altScreen.bottom")[0];
 	const shortcut = bottom === undefined ? "" : ` · ${bottom.replace(/(^|\+)([a-z])/g, (all) => all.toUpperCase())}`;
-	return new TuiAltScreen(terminal, undefined, undefined, {
+	return new TuiAltScreen(terminal, hardwareCursor, undefined, {
 		scrollToEndIndicator: () => `\x1b[7m ↓ Jump to latest message${shortcut} \x1b[27m`,
 		wheelScrollLines: "auto",
 		copySelection: async (text) => {

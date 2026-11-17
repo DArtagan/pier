@@ -33,8 +33,10 @@ searches (Ctrl+Shift+F), copies a mouse selection, and leaves the transcript in 
 terminal's scrollback when you leave. `--tui-mode regular`, pi's flag, draws it in the
 terminal's own scrollback instead.
 
-It looks like pi, as it's drawn by pi's components, in pi's theme, with your `theme`
-and `hideThinkingBlock` from pi's `settings.json`:
+It looks like pi, as it's drawn by pi's components, in pi's theme, with your `theme`,
+`hideThinkingBlock` and `showHardwareCursor` from pi's `settings.json` (the last puts
+the terminal's own cursor in the editor, so a pane that loses focus shows none, or a
+hollow one when the terminal's window does):
 
 - **Answers** with their thinking (Ctrl+T hides it), **tool calls** in pi's coloured
   blocks (grey while running, green done, red failed), with edits as diffs and long
