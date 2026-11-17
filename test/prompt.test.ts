@@ -42,7 +42,7 @@ describe("prompt", () => {
 		const models = createModels();
 		models.setProvider(faux.provider);
 		const registry = createRegistry();
-		// An empty agent dir, so your own AGENTS.md and skills stay out of the test.
+		// An empty agent dir, so your own AGENTS.md stays out of the test.
 		registry.install(createPrompt({ agentDir: join(dir, "agent") }));
 		const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 		try {

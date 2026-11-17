@@ -74,13 +74,17 @@ unless marked.
   overlays, images) with no agent dependencies.
 - **The coding agent exports its interactive components** "for extensions"
   (`packages/coding-agent/src/index.ts`), and `ModelRuntime`, `SettingsManager`,
-  `KeybindingsManager`, `loadProjectContextFiles` and `loadSkills`. pier's client uses
+  `KeybindingsManager`, `loadProjectContextFiles`, `loadSkillsFromDir` and
+  `formatSkillsForPrompt`; pier's skills section uses the last two. pier's client uses
   the components and pi's tool definitions' renderers. Not exported in 1.5.2: the theme
   instance and theme controller (pier imports them from `dist/` by path), the working
   indicator, the app keymap and `createAllToolRenderers` (pier rebuilds what it needs).
 - **Isolation, for later:** `@earendil-works/pi-env` runs tools on another machine
   through a small Rust daemon over SSH, while the harness and credentials stay local;
-  Gondolin runs QEMU or krun micro-VMs.
+  Gondolin runs QEMU or krun micro-VMs. For that work to take up: pier trusts every
+  project, loading its AGENTS.md and skills without asking (Will, 2026-11-17, of
+  skills: "No, let's not ask"), where classic pi gates them on project trust and
+  agentskills.io suggests the same.
 
 ## Earendil's direction
 
@@ -111,6 +115,18 @@ unless marked.
   - Chord's app kit moves into p3, cut to what p3 uses (2026-11-14).
   - Re-checked later on 2026-11-16 at `ac78a60`: Windows is a target, and worker
     memory measurements for slice 7. Nothing for pier.
+  - **Skills** (read at `6359527`, 2026-11-17). Slice 9, the prompt (AGENTS.md, skills,
+    prompt templates), is still a brief, with p2's `plugins/prompt` as its precedent.
+    The plan (`archive/status-2026-11-09.md`) takes skills from three scopes, each a
+    prompt section's contributor: the instance's own, the environment's (that machine's
+    home), and the project's (walking up from the working directory). On a name clash
+    the most specific wins. p2 does it so: one prompt plugin lists every skill, from
+    its data directory's `skills`, `<cwd>/.pi/skills`, and the directories other
+    plugins add to a `PluginSkills` registry (how `agent-plugins` ships
+    `writing-p2-plugins`). It reads through the conversation's environment, watches
+    the files, has no trust check, and reads none of classic pi's settings or packages.
+    pier's `skills.ts` takes that shape: one extension lists them all, and a tool's
+    extension would later add its directory, not a list of its own.
 - **Radius**, Earendil's hosted service: a paid model gateway, web search, shared
   artifacts and an MCP server, closed source (radius.earendil.com/docs, 2026-11-13).
   In p2 and p3 it's also the relay for remote access, the planned home of backups, one
@@ -119,6 +135,20 @@ unless marked.
 - **Next look:** early December, against the 1 December date (`docs/vision.md`).
 
 ## Prior art
+
+- **Where a package's skills go** (read 2026-11-17): nixpkgs settled it in
+  [#547426](https://github.com/NixOS/nixpkgs/issues/547426) as
+  `$out/share/skills/<pname>/<skill>/`, in the order the rest of `share/` uses (icons,
+  man pages, `gsettings-schemas/<name>`). The `installAgentSkills` setup hook
+  ([#558216](https://github.com/NixOS/nixpkgs/pull/558216), September 2026,
+  `doc/hooks/installAgentSkills.section.md`) installs them there, and a dozen packages
+  use it (herdr, hunk, worktrunk, ctx7, just, gh-stack…); ketch, gogcli and
+  todoist-cli don't yet. Agents don't scan packages: the user points them at the
+  directories, as home-manager's claude-code and opencode modules take `skills` paths.
+  [agentskills.io](https://agentskills.io/client-implementation/adding-skills-support)
+  covers the agent's side: project and user scopes, `.agents/skills` for skills shared
+  between agents, user-configured paths, the project's skill winning a name, and,
+  optionally, a trust check on a project's skills.
 
 - [disler/durable-pi](https://github.com/disler/durable-pi): a per-device backend
   (HTTP and server-sent events, a bearer token, a SQLite file per session plus a

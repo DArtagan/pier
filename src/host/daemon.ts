@@ -37,6 +37,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import { ConversationDirectories } from "../layer/claude-code.ts";
 import { createPrompt } from "../layer/prompt.ts";
+import { createSkills } from "../layer/skills.ts";
 import {
 	type AttachTarget,
 	type ConversationSummary,
@@ -104,7 +105,7 @@ export interface DaemonOptions {
 	/** What a new conversation runs with. */
 	model: { provider: string; modelId: string };
 	thinkingLevel?: ModelThinkingLevel;
-	/** Installed after the coding tools; default pier's prompt. */
+	/** Installed after the coding tools; default pier's prompt, and projects' skills only. */
 	extensions?: readonly Extension[];
 	/**
 	 * How long a conversation is idle before its provider's per-session resources (such
@@ -135,7 +136,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	registry.install(CodingTools);
 	// pi-claude-code runs Claude Code in the directory this records for each conversation.
 	registry.install(ConversationDirectories);
-	for (const extension of options.extensions ?? [createPrompt()]) registry.install(extension);
+	for (const extension of options.extensions ?? [createPrompt(), createSkills()]) registry.install(extension);
 
 	const harness = await Harness.open(
 		options.storage,

@@ -85,6 +85,7 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 `$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
 (`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override them. The daemon
 refuses to start with a model it can't run, or a thinking level that isn't pi's.
+`PIER_SKILLS` lists the skills the daemon offers (below, "Skills").
 
 ## Layout
 
@@ -93,8 +94,9 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
   - `claude-code.ts` loads Earendil's
     [pi-claude-code](https://github.com/earendil-works/pi-claude-code), the provider that
     sends requests through Claude Code (below);
-  - `prompt.ts` builds the system prompt from AGENTS.md files and skills, found the way
-    pi finds them.
+  - `prompt.ts` builds the system prompt from AGENTS.md files, found the way pi finds
+    them;
+  - `skills.ts` lists the skills the model is offered (below).
 - `src/host/` is what's thrown away when p3 takes over: `daemon.ts` runs the Harness and
   serves it on the socket, `protocol.ts` is what goes over it (the daemon checks each
   request against its schemas), `client.ts` and `tui.ts` are the client (`commands.ts`
@@ -156,6 +158,35 @@ Things a host must know, all found by the gate:
 Until 2026-11-13 pier used pi-claude-bridge instead, through a shim standing in for
 pi's extension API. It's in git history, and `docs/history.md` records what it took.
 
+## Skills
+
+The prompt lists the skills the model may use, in the
+[agentskills.io](https://agentskills.io) format: each skill's name, description and
+`SKILL.md`. When a task matches one, the model reads its `SKILL.md` with the `read` tool,
+then runs the command it describes with `bash`, in the pane's environment. So the
+command must be on the pane's PATH. They come from two places, read before each
+request, so a change shows on the next one:
+
+- **`PIER_SKILLS`**: the daemon's skill directories, absolute paths separated by `:`
+  as in `PATH`. Each is one skill (holding `SKILL.md`) or a directory of them. Point it
+  at a package's `share/skills/<pname>`, where nixpkgs' `installAgentSkills` hook puts
+  a package's skills (`share/skills/<pname>/<skill>/SKILL.md`). The daemon reads it
+  when it starts, and logs the list.
+- **The project's own**: `.agents/skills` and `.pi/skills` in the conversation's
+  directory and each one above it, up to the repository's root (`.git`); outside a
+  repository, only its own directory.
+
+When two skills share a name, the project's wins, then the nearer directory, then the
+earlier one in `PIER_SKILLS`. pier reads nothing of classic pi's for skills: not
+`~/.pi/agent/skills`, not `settings.json`, not pi packages. Without `PIER_SKILLS`, only
+projects' skills are offered.
+
+**No trust check.** A project's skills load without asking, as its AGENTS.md does
+(Will, 2026-11-17: "No, let's not ask"). A repository you open can put instructions in
+the prompt either way, and a prompt on skills alone would protect little.
+agentskills.io suggests gating them on trust, as classic pi does. Isolating what a
+conversation can reach is the place to revisit this.
+
 ## Known gaps
 
 - A tool call has no timeout unless the model sets one: Durable's bash has no default.
@@ -165,10 +196,7 @@ pi's extension API. It's in git history, and `docs/history.md` records what it t
 - The protocol has no backpressure: a slow client's socket buffers.
 - The socket is chmodded to 0600 just after it starts listening; in its 0700 directory
   that gap doesn't matter.
-- The prompt loads skills from pi's default locations only: `createPrompt()` takes
-  `skillPaths`, but the daemon passes none, so skills listed in `settings.json`
-  (dotfiles adds ketch's there) don't reach pier's Claude (read from the code,
-  2026-11-16).
+- A project's skills load without asking, as its AGENTS.md does (below, "Skills").
 - Images show only as pi's placeholders (`[Image: [image/png] 64x64]`): Alacritty has
   no image protocol, and pi-tui shows none under tmux. Claude sees them: it read a PNG
   and named its colour, by hand on 2026-11-16.

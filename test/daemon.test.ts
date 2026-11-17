@@ -135,6 +135,32 @@ describe("daemon", () => {
 		expect(JSON.stringify(result?.model)).toContain("marker:from-the-pane");
 	});
 
+	it("runs a batch of tool calls one at a time, so a call sees what the call before it wrote", async () => {
+		// The race dotfiles' sequential-file-tools.ts closes for classic pi: a model batches a
+		// change with the bash call that depends on it. The first call here is a slow bash
+		// write, as a write or edit that hasn't landed yet; run beside it, the check misses it.
+		await start([
+			fauxAssistantMessage(
+				[
+					fauxToolCall("bash", { command: "sleep 0.3; echo written > batched.txt" }),
+					fauxToolCall("bash", { command: "cat batched.txt 2>/dev/null || echo absent-$((1+1))" }),
+				],
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage("done"),
+		]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		await connected.request("submit", { text: "write, then read" });
+		const view = await until(conversation, answered("done"));
+		const results = entries(view)
+			.filter((entry) => entry.kind === "pi.tool-result")
+			.map((entry) => JSON.stringify(entry.model));
+		expect(results).toHaveLength(2);
+		expect(results[1]).toContain("written");
+		expect(results[1]).not.toContain("absent-2");
+	});
+
 	it("continues the newest conversation in a directory, and lists by directory", async () => {
 		await start([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		const { client: connected, conversation } = await client();

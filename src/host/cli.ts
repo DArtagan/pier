@@ -6,16 +6,19 @@
 //   pier list [--all]    conversations here (or everywhere), newest first
 //   pier daemon          run the daemon in the foreground
 // The client runs fullscreen; `--tui-mode regular` keeps the terminal's scrollback, as in pi.
-// The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock.
+// The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock. The daemon offers the
+// skills under $PIER_SKILLS (`:`-separated) beside each project's own.
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadClaudeCodeProvider } from "../layer/claude-code.ts";
+import { createPrompt } from "../layer/prompt.ts";
+import { createSkills } from "../layer/skills.ts";
 import { PierClient } from "./client.ts";
 import { startDaemon } from "./daemon.ts";
 import { defaultModel, defaultThinkingLevel } from "./defaults.ts";
-import { socketPath, stateDir } from "./paths.ts";
+import { skillPaths, socketPath, stateDir } from "./paths.ts";
 import type { AttachTarget } from "./protocol.ts";
 import { runTui, type TuiMode, takeTuiMode } from "./tui.ts";
 
@@ -107,6 +110,7 @@ async function daemon(): Promise<number> {
 	const model = defaultModel();
 	const thinkingLevel = defaultThinkingLevel();
 	const state = stateDir();
+	const skills = skillPaths();
 	await mkdir(state, { recursive: true, mode: 0o700 });
 	// pi-claude-code runs Claude Code in the conversation's directory (ConversationDirectories),
 	// and in this process's otherwise, telling the model about it, git status included. The
@@ -120,9 +124,11 @@ async function daemon(): Promise<number> {
 		models,
 		model,
 		thinkingLevel,
+		extensions: [createPrompt(), createSkills({ paths: skills })],
 		log,
 	});
 	log(`storage ${join(state, "pier.sqlite")}`);
+	log(`skills ${skills.length === 0 ? "(none beyond projects')" : skills.join(" ")}`);
 	const stop = () => void running.close();
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);
