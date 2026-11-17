@@ -10,7 +10,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../layer/claude-code.ts";
 import { PierClient } from "./client.ts";
@@ -57,7 +57,16 @@ async function main(argv: string[]): Promise<number> {
 }
 
 async function attachTui(target: AttachTarget, mode: TuiMode): Promise<number> {
-	return runTui({ mode, socketPath: await reachable(), target, cwd: process.cwd(), env: environment() });
+	// pi's own settings, read only: the transcript starts with thinking shown or hidden as pi's would.
+	const settings = SettingsManager.create(process.cwd());
+	return runTui({
+		mode,
+		hideThinking: settings.getHideThinkingBlock(),
+		socketPath: await reachable(),
+		target,
+		cwd: process.cwd(),
+		env: environment(),
+	});
 }
 
 async function list(all: boolean): Promise<number> {

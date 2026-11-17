@@ -3,8 +3,17 @@
 // Fullscreen by default, on the alternate screen, as pi is; `--tui-mode regular` keeps the
 // terminal's own scrollback, as pi's flag does.
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import { copyToClipboard, getMarkdownTheme, getSelectListTheme, initTheme } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-works/pi-ai";
+import {
+	AssistantMessageComponent,
+	CompactionSummaryMessageComponent,
+	calculateContextTokens,
+	copyToClipboard,
+	getMarkdownTheme,
+	getSelectListTheme,
+	initTheme,
+	UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
 import type {
 	AgentState,
 	EntryId,
@@ -19,11 +28,11 @@ import {
 	Container,
 	Editor,
 	getKeybindings,
-	Markdown,
 	type MarkdownTheme,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
+	Spacer,
 	type Terminal,
 	Text,
 	TuiAltScreen,
@@ -32,18 +41,18 @@ import {
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
-import { installKeybindings, isExpandKey, ToolCalls } from "./tool-calls.ts";
+import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
 const dim = sgr(2, 22);
 const bold = sgr(1, 22);
 const red = sgr(31, 39);
 const yellow = sgr(33, 39);
-const cyan = sgr(36, 39);
 
 const HELP = [
 	"Enter sends; while Claude works, it steers. Alt+Enter queues a follow-up instead.",
-	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty. Ctrl+O expands tools' output.",
+	"Esc stops the run. Ctrl+C clears the editor, or detaches when it's empty.",
+	"Ctrl+O expands tools' output and summaries; Ctrl+T shows or hides thinking.",
 	"/new  /resume [all | <number>]  /earlier  /compact [instructions]  /thinking <level>",
 	"/detach (leave it running)  /quit (stop it, then leave)  /exit (wait for it, then leave)",
 	"Fullscreen: PageUp/PageDown scroll, Ctrl+Home/Ctrl+End go to the top/bottom, Ctrl+Up/Ctrl+Down jump",
@@ -75,6 +84,8 @@ export function takeTuiMode(args: readonly string[]): { mode: TuiMode; rest: str
 
 export interface TuiOptions {
 	mode: TuiMode;
+	/** pi's `hideThinkingBlock`: start with thinking hidden; Ctrl+T toggles it. */
+	hideThinking?: boolean;
 	socketPath: string;
 	target: AttachTarget;
 	cwd: string;
@@ -104,7 +115,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
-	const tools = new ToolCalls(tui, options.cwd);
+	const style = new TranscriptStyle(markdownTheme, new ToolCalls(tui, options.cwd), {
+		hideThinking: options.hideThinking ?? false,
+	});
 	let view: TranscriptView | undefined;
 	let leaving: ((code: number) => void) | undefined;
 	let exitWhenIdle = false;
@@ -121,7 +134,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 
 	const render = () => {
 		if (view === undefined) return;
-		fillTranscript(transcript, view, rendered, markdownTheme, tools);
+		fillTranscript(transcript, view, rendered, style);
 		status.setText(statusLine(view, conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
@@ -155,7 +168,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		// Entry ids are unique across conversations, so this only frees the old one's.
 		if (conversation.id !== before) {
 			rendered.clear();
-			tools.clear();
+			style.clear();
 		}
 		// The view can arrive before the reply that carries the number.
 		render();
@@ -303,7 +316,12 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			return { consume: true };
 		}
 		if (isExpandKey(data)) {
-			tools.setExpanded(!tools.expanded);
+			style.setExpanded(!style.expanded);
+			tui.requestRender();
+			return { consume: true };
+		}
+		if (isThinkingKey(data)) {
+			style.setHideThinking(!style.hideThinking);
 			tui.requestRender();
 			return { consume: true };
 		}
@@ -334,7 +352,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const code = await done;
 	left.abort();
 	// Stops the clocks of calls still running, which would keep the process alive.
-	tools.clear();
+	style.clear();
 	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
 	else tui.stop();
 	client.close();
@@ -398,6 +416,91 @@ function leaveFullscreen(tui: TuiAltScreen, components: readonly Component[]): v
 }
 
 /**
+ * How the transcript draws, shared by every entry: pi's Markdown theme, the tool calls'
+ * components, and pi's two toggles, Ctrl+O (tools' output and summaries) and Ctrl+T
+ * (thinking). One per conversation shown.
+ */
+export class TranscriptStyle {
+	readonly markdown: MarkdownTheme;
+	readonly tools: ToolCalls;
+	readonly #answers = new Set<AssistantMessageComponent>();
+	readonly #summaries = new Set<CompactionSummaryMessageComponent>();
+	/** The answer still streaming: one component, updated as it grows, as pi's is. */
+	#streaming: AssistantMessageComponent | undefined;
+	#hideThinking: boolean;
+
+	constructor(markdown: MarkdownTheme, tools: ToolCalls, options: { hideThinking?: boolean } = {}) {
+		this.markdown = markdown;
+		this.tools = tools;
+		this.#hideThinking = options.hideThinking ?? false;
+	}
+
+	get expanded(): boolean {
+		return this.tools.expanded;
+	}
+
+	get hideThinking(): boolean {
+		return this.#hideThinking;
+	}
+
+	/** Expand or collapse tools' output and summaries, as Ctrl+O does in pi. */
+	setExpanded(expanded: boolean): void {
+		this.tools.setExpanded(expanded);
+		for (const summary of this.#summaries) summary.setExpanded(expanded);
+	}
+
+	/** Show or hide thinking, as Ctrl+T does in pi. */
+	setHideThinking(hide: boolean): void {
+		this.#hideThinking = hide;
+		for (const answer of this.#answers) answer.setHideThinkingBlock(hide);
+		this.#streaming?.setHideThinkingBlock(hide);
+	}
+
+	answer(message: AssistantMessage): AssistantMessageComponent {
+		const component = new AssistantMessageComponent(message, this.#hideThinking, this.markdown);
+		this.#answers.add(component);
+		return component;
+	}
+
+	/** The streaming answer's component, updated to `message`; a new one once a stored answer took the last's place. */
+	streaming(message: AssistantMessage): AssistantMessageComponent {
+		if (this.#streaming === undefined) {
+			this.#streaming = new AssistantMessageComponent(undefined, this.#hideThinking, this.markdown);
+		}
+		this.#streaming.updateContent(message, true);
+		return this.#streaming;
+	}
+
+	/** The answer stopped streaming: the next one gets a new component. */
+	streamEnded(): void {
+		this.#streaming = undefined;
+	}
+
+	/**
+	 * A compaction's summary, as pi draws it. `tokensBefore` is the context it summarized,
+	 * which Durable doesn't record: pi takes it from the last answer's usage before the
+	 * compaction, as `fillTranscript` does.
+	 */
+	summary(text: string, tokensBefore: number): CompactionSummaryMessageComponent {
+		const component = new CompactionSummaryMessageComponent(
+			{ role: "compactionSummary", summary: text, tokensBefore, timestamp: 0 },
+			this.markdown,
+		);
+		component.setExpanded(this.expanded);
+		this.#summaries.add(component);
+		return component;
+	}
+
+	/** Forget every component, as when the client shows another conversation. */
+	clear(): void {
+		this.tools.clear();
+		this.#answers.clear();
+		this.#summaries.clear();
+		this.#streaming = undefined;
+	}
+}
+
+/**
  * Fill `transcript` with `view`'s entries and live state, reusing the components in
  * `rendered` for entries drawn before: entries never change once stored.
  */
@@ -405,39 +508,59 @@ export function fillTranscript(
 	transcript: Container,
 	view: TranscriptView,
 	rendered: Map<EntryId, Component>,
-	markdown: MarkdownTheme,
-	tools: ToolCalls,
+	style: TranscriptStyle,
 ): void {
 	transcript.clear();
+	const { tools } = style;
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
+	// The context the last answer so far was sent with: what a compaction after it summarized.
+	let context: number | undefined;
 	for (const item of view.items) {
+		if (item.kind === "entry") {
+			const message = item.entry.model?.[0];
+			// As pi's `getAssistantUsage`: failed answers, and ones without usage, don't count.
+			if (
+				message?.role === "assistant" &&
+				message.usage !== undefined &&
+				message.stopReason !== "error" &&
+				message.stopReason !== "aborted"
+			) {
+				const tokens = calculateContextTokens(message.usage);
+				if (tokens > 0) context = tokens;
+			}
+		}
 		if (item.kind === "earlier") transcript.addChild(new Text(dim("… earlier messages: /earlier loads them"), 1, 0));
 		else if (item.kind === "gap") transcript.addChild(new Text(dim("… loading the messages missed"), 1, 0));
 		else {
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
-				component = renderEntry(item.entry, markdown, tools);
+				component = renderEntry(item.entry, style, context);
 				rendered.set(item.entry.id, component);
 			}
 			transcript.addChild(component);
 		}
 	}
 	tools.follow(live);
-	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, markdown, tools)) {
+	for (const component of renderLive(live, view.docs["pi.inbox"] as InboxState | undefined, style)) {
 		transcript.addChild(component);
 	}
 }
 
-function renderEntry(entry: EntryRecord, markdown: MarkdownTheme, tools: ToolCalls): Component {
+function renderEntry(entry: EntryRecord, style: TranscriptStyle, context: number | undefined): Component {
+	const { tools } = style;
 	const message = entry.model?.[0];
-	if (entry.kind === "pi.compaction") return new Text(dim("── earlier messages were summarized ──"), 1, 1);
+	if (entry.kind === "pi.compaction") {
+		// pi's component says how many tokens were summarized; without an answer before it to tell, a plain rule.
+		if (context === undefined) return new Text(dim("── earlier messages were summarized ──"), 1, 1);
+		return withSpace(style.summary(compactionSummary(message), context));
+	}
 	if (entry.kind === "pi.reset") return new Text(dim("── a new context starts here ──"), 1, 1);
 	if (message === undefined || message.role === "system") return new Container();
 	if (message.role === "user") {
 		const text = typeof message.content === "string" ? message.content : textParts(message.content);
-		return new PromptZone(new Text(`${cyan(bold("›"))} ${text}`, 1, 1));
+		return withSpace(new UserMessageComponent(text, style.markdown));
 	}
-	if (message.role === "assistant") return renderAssistant(message, markdown, tools, true);
+	if (message.role === "assistant") return renderAssistant(message, style, true);
 	// A tool result settles its call's component, which draws it. One whose call isn't
 	// loaded (`/earlier` brought the result's page, not the answer's) draws itself until it is.
 	if (tools.result(message)) return new Container();
@@ -474,68 +597,47 @@ function toolResultText(message: ToolResultMessage): Text {
 }
 
 /**
- * A user message, marked as a prompt with OSC 133 as pi marks its own, so fullscreen's
- * previous and next prompt keys (and tmux, in regular mode) can jump between them.
+ * An answer as pi draws it (`AssistantMessageComponent`: Markdown, thinking shown or
+ * hidden, its error), followed by its tool calls (`ToolCalls`). `stored` is false for the
+ * answer still streaming.
  */
-class PromptZone implements Component {
-	readonly #inner: Component;
-
-	constructor(inner: Component) {
-		this.#inner = inner;
-	}
-
-	render(width: number): string[] {
-		const lines = this.#inner.render(width);
-		if (lines.length === 0) return lines;
-		const marked = [...lines];
-		marked[0] = `\x1b]133;A\x07${marked[0]}`;
-		marked[marked.length - 1] = `\x1b]133;B\x07\x1b]133;C\x07${marked.at(-1)}`;
-		return marked;
-	}
-
-	invalidate(): void {
-		this.#inner.invalidate();
-	}
-}
-
-/**
- * An answer: its text as Markdown, the first line of its thinking, and its tool calls
- * as pi draws them (`ToolCalls`). `stored` is false for the answer still streaming.
- */
-function renderAssistant(
-	message: AssistantMessage,
-	markdown: MarkdownTheme,
-	tools: ToolCalls,
-	stored: boolean,
-): Component {
+function renderAssistant(message: AssistantMessage, style: TranscriptStyle, stored: boolean): Component {
+	const { tools } = style;
 	const container = new Container();
+	container.addChild(stored ? style.answer(message) : style.streaming(message));
 	for (const part of message.content) {
-		if (part.type === "text" && part.text.trim() !== "") container.addChild(new Markdown(part.text, 1, 1, markdown));
-		else if (part.type === "thinking" && part.thinking.trim() !== "") {
-			container.addChild(new Text(dim(`thinking: ${part.thinking.trim().split("\n")[0]?.slice(0, 120)}`), 1, 0));
-		} else if (part.type === "toolCall") {
-			const component = tools.call(part, stored);
-			if (component !== undefined) container.addChild(component);
-			if (stored && (message.stopReason === "error" || message.stopReason === "aborted")) {
-				tools.failed(part, message.stopReason === "aborted" ? "Operation aborted" : message.errorMessage || "Error");
-			}
+		if (part.type !== "toolCall") continue;
+		const component = tools.call(part, stored);
+		if (component !== undefined) container.addChild(component);
+		if (stored && (message.stopReason === "error" || message.stopReason === "aborted")) {
+			tools.failed(part, message.stopReason === "aborted" ? "Operation aborted" : message.errorMessage || "Error");
 		}
-	}
-	if (message.stopReason === "error" && message.errorMessage) {
-		container.addChild(new Text(red(message.errorMessage), 1, 0));
 	}
 	return container;
 }
 
-function renderLive(
-	live: LiveState,
-	inbox: InboxState | undefined,
-	markdown: MarkdownTheme,
-	tools: ToolCalls,
-): Component[] {
+/** pi's components start with no blank line of their own; pi's chat puts a spacer before each. */
+function withSpace(component: Component): Component {
+	const container = new Container();
+	container.addChild(new Spacer(1));
+	container.addChild(component);
+	return container;
+}
+
+/** The summary in a compaction entry, without the wrapping Durable gives it for the model. */
+export function compactionSummary(message: Message | undefined): string {
+	if (message === undefined || message.role !== "user") return "";
+	const text = typeof message.content === "string" ? message.content : textParts(message.content);
+	const match = /<summary>\n?([\s\S]*?)\n?<\/summary>\s*$/.exec(text);
+	return (match?.[1] ?? text).trim();
+}
+
+function renderLive(live: LiveState, inbox: InboxState | undefined, style: TranscriptStyle): Component[] {
+	const { tools } = style;
 	const components: Component[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
-	if (partial !== undefined) components.push(renderAssistant(partial, markdown, tools, false));
+	if (partial !== undefined) components.push(renderAssistant(partial, style, false));
+	else style.streamEnded();
 	if (live.generation?.retry !== undefined) {
 		components.push(new Text(yellow(`retrying: ${live.generation.retry.error}`), 1, 0));
 	}

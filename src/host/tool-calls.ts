@@ -32,17 +32,20 @@ type Ui = ConstructorParameters<typeof ToolExecutionComponent>[5];
 
 /** pi's binding for showing tools' whole output, which pi's renderers name in their hints. */
 export const EXPAND_TOOLS = "app.tools.expand";
+/** pi's binding for showing and hiding thinking. */
+export const TOGGLE_THINKING = "app.thinking.toggle";
 
 /**
- * pi-tui's keybindings, plus pi's `app.tools.expand` (Ctrl+O). pi's own app keymap
- * (`KEYBINDINGS`) isn't exported in 1.5.2, so this adds the one binding the tool
- * renderers name; without it their "… more lines, to expand" hint names no key.
+ * pi-tui's keybindings, plus pi's two the transcript uses, with pi's keys: Ctrl+O and
+ * Ctrl+T. pi's own app keymap (`KEYBINDINGS`) isn't exported in 1.5.2; without these,
+ * pi's components' hints ("… more lines, ctrl+o to expand") name no key.
  */
 export function installKeybindings(): void {
 	setKeybindings(
 		new KeybindingsManager({
 			...TUI_KEYBINDINGS,
 			[EXPAND_TOOLS]: { defaultKeys: "ctrl+o", description: "Toggle tool output" },
+			[TOGGLE_THINKING]: { defaultKeys: "ctrl+t", description: "Toggle thinking blocks" },
 		}),
 	);
 }
@@ -50,6 +53,11 @@ export function installKeybindings(): void {
 /** Whether `data` is the key that expands and collapses tools' output. */
 export function isExpandKey(data: string): boolean {
 	return getKeybindings().matches(data, EXPAND_TOOLS);
+}
+
+/** Whether `data` is the key that shows and hides thinking. */
+export function isThinkingKey(data: string): boolean {
+	return getKeybindings().matches(data, TOGGLE_THINKING);
 }
 
 interface Call {

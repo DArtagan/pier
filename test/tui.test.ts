@@ -2,13 +2,13 @@
 // transcript, which long conversations depend on staying cheap, and tool calls as pi
 // draws them.
 import { stripVTControlCharacters } from "node:util";
-import type { Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { getMarkdownTheme, initTheme } from "@earendil-works/pi-coding-agent";
 import type { EntryId, EntryRecord, LiveState, TranscriptView } from "@earendil-works/pi-durable";
 import { type Component, Container } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installKeybindings, isExpandKey, ToolCalls } from "../src/host/tool-calls.ts";
-import { fillTranscript, takeTuiMode } from "../src/host/tui.ts";
+import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "../src/host/tool-calls.ts";
+import { compactionSummary, fillTranscript, TranscriptStyle, takeTuiMode } from "../src/host/tui.ts";
 
 const ui = { requestRender() {} } as unknown as ConstructorParameters<typeof ToolCalls>[0];
 
@@ -55,10 +55,10 @@ describe("fillTranscript", () => {
 	it("reuses stored entries' components on each update, and draws the streamed answer anew", () => {
 		const transcript = new Container();
 		const rendered = new Map<EntryId, Component>();
-		const tools = new ToolCalls(ui, "/tmp");
-		fillTranscript(transcript, view(3, "streaming"), rendered, markdown, tools);
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		fillTranscript(transcript, view(3, "streaming"), rendered, style);
 		const stored = transcript.children.slice(0, 3);
-		fillTranscript(transcript, view(4, "streaming more"), rendered, markdown, tools);
+		fillTranscript(transcript, view(4, "streaming more"), rendered, style);
 		expect(transcript.children.slice(0, 3).every((child, index) => child === stored[index])).toBe(true);
 		expect(rendered.size).toBe(4);
 		expect(text(transcript)).toContain("message 4");
@@ -100,7 +100,7 @@ describe("tool calls", () => {
 		}) as unknown as TranscriptView;
 	const fill = (tools: ToolCalls, stored: EntryRecord[], live?: LiveState) => {
 		const transcript = new Container();
-		fillTranscript(transcript, view(stored, live), new Map(), markdown, tools);
+		fillTranscript(transcript, view(stored, live), new Map(), new TranscriptStyle(markdown, tools));
 		return show(transcript);
 	};
 
@@ -171,9 +171,9 @@ describe("tool calls", () => {
 		const stored = result("r1", "read", "file contents");
 		const transcript = new Container();
 		const rendered = new Map<EntryId, Component>();
-		fillTranscript(transcript, view([stored]), rendered, markdown, tools);
+		fillTranscript(transcript, view([stored]), rendered, new TranscriptStyle(markdown, tools));
 		expect(show(transcript)).toContain("file contents");
-		fillTranscript(transcript, view([answer, stored]), rendered, markdown, tools);
+		fillTranscript(transcript, view([answer, stored]), rendered, new TranscriptStyle(markdown, tools));
 		const shown = show(transcript);
 		expect(shown).toContain("read /tmp/f.txt");
 		// pi shows a read collapsed, without its contents.
@@ -186,5 +186,99 @@ describe("tool calls", () => {
 		expect(shown).toContain("todoist");
 		expect(shown).toContain('"query": "today"');
 		expect(shown).toContain("3 tasks");
+	});
+});
+
+describe("answers, thinking and summaries", () => {
+	initTheme();
+	installKeybindings();
+	const markdown = getMarkdownTheme();
+	const show = (container: Container) => stripVTControlCharacters(container.render(100).join("\n"));
+	const entry = (id: number, kind: string, message: unknown) =>
+		({ id: id as EntryId, kind, model: [message] }) as unknown as EntryRecord;
+	const answer = entry(2, "pi.assistant", {
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "First I weigh it.\nThen I decide." },
+			{ type: "text", text: "The **answer** is 42." },
+		],
+		stopReason: "stop",
+	});
+	const fill = (style: TranscriptStyle, entries: EntryRecord[], live: LiveState = {}) => {
+		const transcript = new Container();
+		const view = {
+			items: entries.map((stored) => ({ kind: "entry", entry: stored })),
+			docs: { "pi.live": live },
+		} as unknown as TranscriptView;
+		fillTranscript(transcript, view, new Map(), style);
+		return transcript;
+	};
+
+	it("shows an answer's thinking whole, and Ctrl+T hides it, as pi does", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		const transcript = fill(style, [answer]);
+		expect(show(transcript)).toContain("Then I decide.");
+		expect(show(transcript)).toContain("The answer is 42.");
+		expect(isThinkingKey("\x14")).toBe(true);
+		style.setHideThinking(true);
+		expect(show(transcript)).not.toContain("Then I decide.");
+		expect(show(transcript)).toContain("Thinking...");
+		expect(show(transcript)).toContain("The answer is 42.");
+	});
+
+	it("starts with thinking hidden when pi's hideThinkingBlock says so, the streaming answer too", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"), { hideThinking: true });
+		const streaming = {
+			run: {},
+			generation: {
+				message: { role: "assistant", content: [{ type: "thinking", thinking: "still weighing" }] },
+			},
+		} as unknown as LiveState;
+		const transcript = fill(style, [answer], streaming);
+		expect(show(transcript)).not.toContain("weigh");
+		style.setHideThinking(false);
+		expect(show(transcript)).toContain("still weighing");
+	});
+
+	it("updates one component as an answer streams, and starts another for the next", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		const partial = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] }) as AssistantMessage;
+		const first = style.streaming(partial("Hel"));
+		expect(style.streaming(partial("Hello"))).toBe(first);
+		style.streamEnded();
+		expect(style.streaming(partial("Next"))).not.toBe(first);
+	});
+
+	it("marks user messages and answers as prompt zones, for Ctrl+Up and Ctrl+Down", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		const user = entry(1, "pi.user", { role: "user", content: "what is it?" });
+		const lines = fill(style, [user, answer]).render(100).join("\n");
+		expect(lines.split("\x1b]133;A\x07").length - 1).toBe(2);
+	});
+
+	it("shows a compaction as pi's collapsed summary, and Ctrl+O shows the summary itself", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		const text =
+			"The conversation history before this point was compacted into the following summary:\n\n<summary>\n## Goal\nShip it.\n</summary>";
+		const compaction = entry(3, "pi.compaction", {
+			role: "user",
+			content: [{ type: "text", text }],
+		});
+		expect(compactionSummary(compaction.model?.[0])).toBe("## Goal\nShip it.");
+		const used = entry(2, "pi.assistant", {
+			role: "assistant",
+			content: [{ type: "text", text: "ok" }],
+			stopReason: "stop",
+			usage: { input: 10, output: 5, cacheRead: 145000, cacheWrite: 0, totalTokens: 145015 },
+		});
+		// With no answer before it loaded, pier can't say what it summarized: a rule, not "0 tokens".
+		expect(show(fill(style, [compaction]))).toContain("earlier messages were summarized");
+		const transcript = fill(style, [used, compaction]);
+		expect(show(transcript)).toContain("[compaction]");
+		expect(show(transcript)).toContain("Compacted from 145,015 tokens");
+		expect(show(transcript)).not.toContain("Ship it.");
+		style.setExpanded(true);
+		expect(show(transcript)).toContain("Ship it.");
+		expect(show(transcript)).not.toContain("<summary>");
 	});
 });

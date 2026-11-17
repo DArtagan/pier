@@ -18,7 +18,7 @@ import {
 	TuiMainScreen,
 } from "@earendil-works/pi-tui";
 import { ToolCalls } from "../../src/host/tool-calls.ts";
-import { chatLayout, fillTranscript } from "../../src/host/tui.ts";
+import { chatLayout, fillTranscript, TranscriptStyle } from "../../src/host/tui.ts";
 
 const COLUMNS = 120;
 const ROWS = 50;
@@ -144,13 +144,13 @@ function run(mode: "fullscreen" | "regular", count: number): string {
 
 	const stored = entries(count);
 	const rendered = new Map<EntryId, Component>();
-	const tools = new ToolCalls(tui, "/tmp/pier-bench");
+	const style = new TranscriptStyle(markdown, new ToolCalls(tui, "/tmp/pier-bench"));
 	gc();
 	const heapBefore = process.memoryUsage().heapUsed;
 
 	// The first frame with every entry new, as after /earlier or a long catch-up.
 	let start = performance.now();
-	fillTranscript(transcript, viewOf(stored, undefined), rendered, markdown, tools);
+	fillTranscript(transcript, viewOf(stored, undefined), rendered, style);
 	tui.renderNow();
 	const cold = performance.now() - start;
 	const lines = transcript.render(COLUMNS).length;
@@ -164,7 +164,7 @@ function run(mode: "fullscreen" | "regular", count: number): string {
 		streamed += update % 12 === 11 ? "\n\n" : `word${update} `;
 		const view = viewOf(stored, streamed);
 		start = performance.now();
-		fillTranscript(transcript, view, rendered, markdown, tools);
+		fillTranscript(transcript, view, rendered, style);
 		const filled = performance.now();
 		tui.renderNow();
 		fills.push(filled - start);
