@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { asPicker, type CommandSource, commandCompletions, family } from "../src/host/commands.ts";
 import type { ConversationSummary, ModelSummary } from "../src/host/protocol.ts";
 import { installKeybindings } from "../src/host/tool-calls.ts";
+import { fillHistory } from "../src/host/tui.ts";
 
 const MODELS: ModelSummary[] = [
 	{ provider: "claude-code", id: "claude-opus-5-5", thinkingLevels: ["low", "medium", "high", "xhigh", "max"] },
@@ -145,6 +146,23 @@ describe("the commands' menu", () => {
 		target.handleInput(KEYS.enter);
 		await settle();
 		expect(sent).toEqual(["/new"]);
+	});
+});
+
+describe("the editor's history", () => {
+	it("holds the conversation's messages, newest first under Up, and only that conversation's", () => {
+		const { editor: target } = editor();
+		fillHistory(target, [{ text: "old one" }, { text: "newer one" }]);
+		target.handleInput(KEYS.up);
+		expect(target.getText()).toBe("newer one");
+		target.handleInput(KEYS.up);
+		expect(target.getText()).toBe("old one");
+
+		target.setText("");
+		fillHistory(target, [{ text: "another conversation" }]);
+		target.handleInput(KEYS.up);
+		target.handleInput(KEYS.up);
+		expect(target.getText()).toBe("another conversation");
 	});
 });
 

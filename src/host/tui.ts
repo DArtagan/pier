@@ -230,6 +230,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		if (conversation.id !== before) {
 			rendered.clear();
 			style.clear();
+			// The daemon sends the view before its reply, so `view` is this conversation's now.
+			fillHistory(editor, userMessages());
 			// The footer says which conversation; a new one, or a fork, says so at the top of
 			// its transcript, which scrolls away as it grows.
 			const forked = forkedFrom === undefined ? "" : `, forked from #${forkedFrom}`;
@@ -532,6 +534,17 @@ export async function runTui(options: TuiOptions): Promise<number> {
 }
 
 /** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported in 1.5.2). */
+/**
+ * Fill the editor's Up-arrow history with a conversation's messages, oldest first, as pi
+ * does when it opens a session (`populateHistory`), replacing the last conversation's.
+ * pi-tui's editor keeps it in a private array, which only `addToHistory` adds to.
+ */
+export function fillHistory(editor: CustomEditor, messages: readonly { text: string }[]): void {
+	const held = editor as unknown as { history?: string[] };
+	if (Array.isArray(held.history)) held.history.length = 0;
+	for (const message of messages) editor.addToHistory(message.text);
+}
+
 function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 	const bottom = getKeybindings().getKeys("tui.altScreen.bottom")[0];
 	const shortcut = bottom === undefined ? "" : ` · ${bottom.replace(/(^|\+)([a-z])/g, (all) => all.toUpperCase())}`;

@@ -24,8 +24,9 @@ In this repo, `npm run pier -- <args>`, or `node src/host/cli.ts`; the package (
 builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
 Alt+Enter queues a follow-up, and Alt+Up takes what's queued back into the editor; Esc
-stops the run; Ctrl+C on an empty editor leaves, and the run carries on. When the
-daemon restarts, the client reconnects and carries on where it left off.
+stops the run; Ctrl+C on an empty editor leaves, and the run carries on. Up in an empty
+editor recalls the conversation's earlier messages, from every session, as in pi. When
+the daemon restarts, the client reconnects and carries on where it left off.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:
@@ -161,8 +162,9 @@ pi's extension API. It's in git history, and `docs/history.md` records what it t
   `skillPaths`, but the daemon passes none, so skills listed in `settings.json`
   (dotfiles adds ketch's there) don't reach pier's Claude (read from the code,
   2026-11-16).
-- Not tried with real Claude: images. Steering a run (Enter while Claude works) through
-  pi-claude-code works: Will steered a run of pier's own with it on 2026-11-16.
+- Images show only as pi's placeholders (`[Image: [image/png] 64x64]`): Alacritty has
+  no image protocol, and pi-tui shows none under tmux. Claude sees them: it read a PNG
+  and named its colour, by hand on 2026-11-16.
 
 ## Versions
 

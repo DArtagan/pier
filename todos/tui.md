@@ -44,11 +44,14 @@ Checked 2026-11-16:
   `[Image: [image/png] 2x2]` placeholder; a user message's image shows as `[image]`.
   With Kitty claimed, pi's component sends the Kitty escape. Nothing for pier to build
   until Will's terminal can show one.
+- **With real Claude**, by hand: Claude read a 64×64 red PNG and answered "Red"; pier
+  showed `[Image: [image/png] 64x64]`.
 
 ## pi's habits
 
 Will's review, 2026-11-16: the autocomplete menu, `/model`, `/thinking`, `/resume`,
-`/fork`, `/tree` and Alt+Up are built (`README.md`, "Use"). Left, not chosen yet:
+`/fork`, `/tree`, Alt+Up and the editor's history across sessions are built
+(`README.md`, "Use"); an external editor and image paste are dropped. Left, not chosen yet:
 
 - **Will's keybindings and settings** from `~/.pi/agent/keybindings.json` and
   `settings.json`. His keybindings remap follow-up to Ctrl+Shift+Enter and Alt+Enter,
@@ -63,13 +66,6 @@ Will's review, 2026-11-16: the autocomplete menu, `/model`, `/thinking`, `/resum
 - **`@file` completion.** The client runs in the pane, in the conversation's
   directory, so it can list files itself. pi-tui's `CombinedAutocompleteProvider`
   handles slash commands and paths.
-- **Editor:** three of pi's editor features.
-  - History across sessions. pi fills the editor's Up-arrow history from the session's
-    own messages when it opens one; pier's starts empty each time the client starts.
-  - An external editor: Ctrl+G opens the editor's text in `$VISUAL`/`$EDITOR`, and
-    takes back what's saved.
-  - Image paste: Ctrl+V pastes an image from the clipboard as an attachment. Moot
-    while Alacritty can't show images, though Claude could still see them.
 - **`/fork` and `/tree` that move within one conversation**, as pi's do. pier's make a
   conversation per branch, which keeps each branch's prompt cache; pi's
   `TreeSelectorComponent` and `UserMessageSelectorComponent` expect pi's session tree,
