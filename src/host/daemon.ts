@@ -8,16 +8,25 @@ import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { cleanupSessionResources, type Models, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import {
+	clampThinkingLevel,
+	cleanupSessionResources,
+	getSupportedThinkingLevels,
+	type Models,
+	type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import {
 	AgentDoc,
 	type Conversation,
 	type ConversationId,
+	type ConversationInit,
 	type ConversationWatch,
 	createRegistry,
 	defineDoc,
+	type EntryId,
 	type Extension,
 	Harness,
+	InboxDoc,
 	LiveDoc,
 	type LiveState,
 	ProviderDoc,
@@ -35,6 +44,7 @@ import {
 	type Event,
 	type Method,
 	type Methods,
+	type ModelSummary,
 	PROTOCOL_VERSION,
 	type Request,
 	type Response,
@@ -268,6 +278,102 @@ class ConversationAccess {
 		return { conversation, number, created: true };
 	}
 
+	/**
+	 * A new conversation whose history is `conversation`'s up to just before its user message
+	 * `before`, numbered as any other. Durable forks *at* an entry, the last one the fork
+	 * keeps, so this forks at the entry before; before the first message there's none, and
+	 * the result is a new conversation with the same model, thinking level and directory.
+	 */
+	async fork(conversation: Conversation, before: EntryId): Promise<number> {
+		const message = (await conversation.entries({ minEntryId: before, maxEntryId: before }, 1, undefined, context))
+			.items[0];
+		if (message?.kind !== "pi.user") throw new Error("Forks start at one of your messages");
+		const previous = (await conversation.entries({ maxEntryId: (before - 1) as EntryId }, 1, undefined, context))
+			.items[0];
+		let number = 0;
+		const init: ConversationInit = async (tx, id) => {
+			number = assign(await tx.doc(NumbersDoc), id);
+		};
+		// The pane's environment comes with the client's attach, as for any conversation.
+		if (previous !== undefined) {
+			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
+		} else {
+			const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
+			await this.harness.createConversation(
+				{
+					ownership: { kind: "ownerless" },
+					agent: {
+						...(agent?.model === undefined ? {} : { model: agent.model }),
+						...(agent?.thinkingLevel === undefined ? {} : { thinkingLevel: agent.thinkingLevel }),
+						...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
+					},
+					init,
+				},
+				context,
+			);
+		}
+		return number;
+	}
+
+	/**
+	 * Withdraw `conversation`'s queued messages, steering and follow-ups, and return the text
+	 * of those withdrawn, oldest first. One a run took in meanwhile isn't withdrawn, and
+	 * isn't returned.
+	 */
+	async dequeue(conversation: Conversation): Promise<string[]> {
+		const inbox = await this.harness.snapshot(InboxDoc, conversation.id, context);
+		const texts: string[] = [];
+		for (const item of inbox?.items ?? []) {
+			if (item.mode === "write") continue;
+			const submission = await this.harness.submission(item.id, context);
+			if ((await submission?.abort(context)) !== "aborted") continue;
+			const text = textOf(item.content as string | readonly { type: string; text?: string }[]);
+			if (text.trim() !== "") texts.push(text);
+		}
+		return texts;
+	}
+
+	/** The models the daemon can run, for the client's pickers. */
+	async availableModels(): Promise<ModelSummary[]> {
+		const models = await this.models.getAvailable();
+		return models.map((model) => ({
+			provider: model.provider,
+			id: model.id,
+			...(model.name === undefined || model.name === model.id ? {} : { name: model.name }),
+			thinkingLevels: getSupportedThinkingLevels(model),
+		}));
+	}
+
+	/**
+	 * Change `conversation`'s model or thinking level. The thinking level is clamped to what
+	 * the model (the new one, if it changes) supports, as pi clamps it.
+	 */
+	async configure(
+		conversation: Conversation,
+		change: Methods["configure"]["params"],
+	): Promise<Methods["configure"]["result"]> {
+		const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
+		const ref = change.model ?? agent?.model ?? this.#options.model;
+		const model = this.models.getModel(ref.provider, ref.modelId);
+		if (change.model !== undefined && model === undefined) {
+			throw new Error(`No model ${change.model.provider}/${change.model.modelId}`);
+		}
+		const requested = change.thinkingLevel ?? agent?.thinkingLevel ?? this.#options.thinkingLevel;
+		const thinkingLevel =
+			requested === undefined || model === undefined ? requested : clampThinkingLevel(model, requested);
+		await conversation.configure(
+			{
+				...(change.model === undefined ? {} : { model: { ...change.model } }),
+				...(thinkingLevel === undefined ||
+				(change.thinkingLevel === undefined && thinkingLevel === agent?.thinkingLevel)
+					? {}
+					: { thinkingLevel }),
+			},
+			context,
+		);
+		return thinkingLevel === undefined ? {} : { thinkingLevel };
+	}
+
 	/** Number the top-level conversations that have no number yet, oldest first: those of a store from before numbers. */
 	async numberAll(): Promise<void> {
 		await this.harness.commit(async (tx) => {
@@ -310,9 +416,13 @@ class ConversationAccess {
 			const message = first?.model?.[0];
 			const text = message?.role === "user" ? textOf(message.content) : undefined;
 			const live = await this.harness.snapshot(LiveDoc, record.id, context);
+			const parent = record.parent === undefined ? undefined : byId.get(record.parent.conversationId);
 			found.push({
 				id: record.id,
 				number,
+				...(parent === undefined || record.parent === undefined
+					? {}
+					: { parent: { number: parent, at: record.parent.at } }),
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
@@ -388,14 +498,19 @@ class Connection {
 				);
 				return { submission: submission.id };
 			}
+			case "dequeue":
+				return { texts: await this.#conversations.dequeue(this.#conversation()) };
 			case "abort":
 				await this.#conversation().abort(context);
 				return {};
 			case "compact":
 				return { task: await this.#conversation().compact(request.params.instructions, context) };
 			case "configure":
-				await this.#conversation().configure(request.params, context);
-				return {};
+				return this.#conversations.configure(this.#conversation(), request.params);
+			case "models":
+				return { models: await this.#conversations.availableModels() };
+			case "fork":
+				return { number: await this.#conversations.fork(this.#conversation(), request.params.before) };
 			case "entries": {
 				const { limit, ...query } = request.params;
 				const page = await this.#conversation().entries(query, Math.min(limit, 500), undefined, context);

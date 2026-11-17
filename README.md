@@ -23,9 +23,22 @@ pier --tui-mode regular …  # the client in the terminal's own scrollback, not 
 In this repo, `npm run pier -- <args>`, or `node src/host/cli.ts`; the package (dotfiles
 builds it with Nix) runs `dist/`, from `npm run build`. In the client,
 `/help` lists the keys and commands. Enter sends, and steers while Claude works;
-Alt+Enter queues a follow-up; Esc stops the run; Ctrl+C on an empty editor leaves, and
-the run carries on. When the daemon restarts, the client reconnects and carries on
-where it left off.
+Alt+Enter queues a follow-up, and Alt+Up takes what's queued back into the editor; Esc
+stops the run; Ctrl+C on an empty editor leaves, and the run carries on. When the
+daemon restarts, the client reconnects and carries on where it left off.
+
+Typing `/` opens pi's menu of commands, which more letters filter; a command's
+argument is picked from a menu of its own, with the arrows and Enter:
+
+- `/model` and `/thinking`: the models the daemon has credentials for, and the levels
+  the conversation's model supports (one it doesn't is clamped, as pi clamps it).
+- `/resume`: every conversation, those in this directory first.
+- `/fork`: one of your messages. A new conversation starts with the history before it,
+  and the message goes back into the editor, as pi's `/fork` does.
+- `/tree`: the conversation's family of forks, from the root down, to switch between.
+  Each branch is a conversation of its own, with its own Claude Code prompt cache: going
+  back to one reads its context from the cache (99.8%, by hand on 2026-11-16), as long
+  as it's been idle under the hour pi-claude-code's cache entries last.
 
 The client runs fullscreen, on the alternate screen, as pi does by default: it scrolls
 (PageUp, Ctrl+Home, Ctrl+End), jumps between your messages (Ctrl+Up, Ctrl+Down),
@@ -77,7 +90,8 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
     pi finds them.
 - `src/host/` is what's thrown away when p3 takes over: `daemon.ts` runs the Harness and
   serves it on the socket, `protocol.ts` is what goes over it, `client.ts` and `tui.ts`
-  are the client, and `cli.ts` is `pier`.
+  are the client (`commands.ts` its slash commands and their menus), and `cli.ts` is
+  `pier`.
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
@@ -147,8 +161,8 @@ pi's extension API. It's in git history, and `docs/history.md` records what it t
   `skillPaths`, but the daemon passes none, so skills listed in `settings.json`
   (dotfiles adds ketch's there) don't reach pier's Claude (read from the code,
   2026-11-16).
-- Not tried with real Claude: steering a run (Enter while Claude works) through
-  pi-claude-code, and images.
+- Not tried with real Claude: images. Steering a run (Enter while Claude works) through
+  pi-claude-code works: Will steered a run of pier's own with it on 2026-11-16.
 
 ## Versions
 

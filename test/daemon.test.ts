@@ -251,6 +251,17 @@ describe("daemon", () => {
 			await until(conversation, answered(`answer ${turn}`));
 		}
 	}
+	/** Each message sent, then its answer awaited. */
+	async function converse2(
+		connected: PierClient,
+		conversation: AttachedConversation,
+		...turns: [text: string, answer: string][]
+	) {
+		for (const [text, answer] of turns) {
+			await connected.request("submit", { text });
+			await until(conversation, answered(answer));
+		}
+	}
 	const answers = (count: number) => Array.from({ length: count }, (_, turn) => fauxAssistantMessage(`answer ${turn}`));
 
 	it("loads earlier entries page by page, until the start", async () => {
@@ -359,6 +370,100 @@ describe("daemon", () => {
 			contextWindow: faux.provider.getModels()[0]?.contextWindow,
 		});
 		expect(await connected.request("model", { provider: "faux", modelId: "nowhere" })).toEqual({});
+	});
+
+	it("lists the models it can run, with the thinking levels each supports", async () => {
+		await start([]);
+		const { client: connected } = await client();
+		const { models } = await connected.request("models", {});
+		expect(models.map((model) => `${model.provider}/${model.id}`)).toContain("faux/faux-1");
+		expect(models.every((model) => model.thinkingLevels.length > 0)).toBe(true);
+	});
+
+	it("changes a conversation's model, and clamps a thinking level the model doesn't support", async () => {
+		await start([]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		// The faux model doesn't reason: every level but off is clamped to off.
+		const model = (await connected.request("models", {})).models.find((each) => each.id === "faux-1");
+		expect(model?.thinkingLevels).toEqual(["off"]);
+		const { thinkingLevel } = await connected.request("configure", {
+			model: { provider: "faux", modelId: "faux-1" },
+			thinkingLevel: "high",
+		});
+		expect(thinkingLevel).toBe("off");
+		const view = await until(
+			conversation,
+			(latest) => (latest.docs["pi.agent"] as { thinkingLevel?: string } | undefined)?.thinkingLevel === "off",
+		);
+		expect((view.docs["pi.agent"] as { model?: unknown }).model).toEqual({ provider: "faux", modelId: "faux-1" });
+		await expect(connected.request("configure", { model: { provider: "faux", modelId: "nowhere" } })).rejects.toThrow(
+			/No model/,
+		);
+	});
+
+	it("forks before one of your messages, keeping what came before, and lists the fork under its parent", async () => {
+		await start([
+			fauxAssistantMessage("first answer"),
+			fauxAssistantMessage("second answer"),
+			fauxAssistantMessage("branch answer"),
+		]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		await converse2(connected, conversation, ["one", "first answer"], ["two", "second answer"]);
+		const parent = conversation.number;
+		const before = (await connected.request("entries", { limit: 50, order: "ascending" })).entries.filter(
+			(entry) => entry.kind === "pi.user",
+		)[1];
+		if (before === undefined || parent === undefined) throw new Error("no second message");
+		const { number } = await connected.request("fork", { before: before.id });
+		await conversation.attach({ kind: "number", number }, dir, {});
+		const forked = await until(conversation, answered("first answer"));
+		const said = entries(forked).flatMap((entry) => (entry.kind === "pi.user" ? [JSON.stringify(entry.model)] : []));
+		expect(said).toHaveLength(1);
+		expect(said[0]).toContain('"one"');
+		expect(answered("second answer")(forked)).toBe(false);
+		await connected.request("submit", { text: "another way" });
+		await until(conversation, answered("branch answer"));
+		const { conversations } = await connected.request("list", {});
+		const fork = conversations.find((summary) => summary.number === number);
+		expect(fork?.parent?.number).toBe(parent);
+		expect(conversations.find((summary) => summary.number === parent)?.parent).toBeUndefined();
+	});
+
+	it("forks before the first message as a new conversation like it", async () => {
+		await start([fauxAssistantMessage("first answer")]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		await converse2(connected, conversation, ["one", "first answer"]);
+		const first = (await connected.request("entries", { limit: 50 })).entries.find((entry) => entry.kind === "pi.user");
+		if (first === undefined) throw new Error("no message");
+		const { number } = await connected.request("fork", { before: first.id });
+		await conversation.attach({ kind: "number", number }, dir, {});
+		expect((await connected.request("entries", { limit: 50 })).entries).toEqual([]);
+		await expect(connected.request("fork", { before: 1 as never })).rejects.toThrow(/your messages/);
+	});
+
+	it("takes queued messages back, as pi's Alt+Up does", async () => {
+		let release: (() => void) | undefined;
+		await start([
+			() =>
+				new Promise((resolve) => {
+					release = () => resolve(fauxAssistantMessage("slow answer"));
+				}),
+			fauxAssistantMessage("next answer"),
+		]);
+		const { client: connected, conversation } = await client();
+		await conversation.attach({ kind: "new" }, dir, {});
+		await connected.request("submit", { text: "start" });
+		await until(conversation, (view) => !idle(view));
+		await connected.request("submit", { text: "queued one", whenBusy: "followUp" });
+		await connected.request("submit", { text: "queued two", whenBusy: "followUp" });
+		expect(await connected.request("dequeue", {})).toEqual({ texts: ["queued one", "queued two"] });
+		expect(await connected.request("dequeue", {})).toEqual({ texts: [] });
+		release?.();
+		const view = await until(conversation, (latest) => idle(latest) && answered("slow answer")(latest));
+		expect(answered("queued one")(view)).toBe(false);
 	});
 
 	it("rejects requests before attaching", async () => {

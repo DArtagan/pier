@@ -20,7 +20,7 @@ import type {
 } from "@earendil-works/pi-durable";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Which conversation `attach` opens. */
 export type AttachTarget =
@@ -40,6 +40,17 @@ export interface ConversationSummary {
 	/** The first user message, cut short. */
 	readonly title?: string;
 	readonly busy: boolean;
+	/** For a fork: the conversation it was forked from, and the entry its history runs through. */
+	readonly parent?: { readonly number: number; readonly at: EntryId };
+}
+
+/** A model the daemon can run, for the client's `/model` and `/thinking` pickers. */
+export interface ModelSummary {
+	readonly provider: string;
+	readonly id: string;
+	readonly name?: string;
+	/** The thinking levels it supports, as pi-ai's `getSupportedThinkingLevels` says. */
+	readonly thinkingLevels: readonly ModelThinkingLevel[];
 }
 
 /** Every request, by method: its params and its result. */
@@ -65,10 +76,30 @@ export interface Methods {
 		params: { text: string; whenBusy?: "steer" | "followUp" };
 		result: { submission: SubmissionId };
 	};
+	/**
+	 * Withdraw the attached conversation's queued messages, as pi's Alt+Up does, and return
+	 * their text, oldest first, for the editor. One the run took in meanwhile stays sent.
+	 */
+	dequeue: { params: Record<string, never>; result: { texts: string[] } };
 	/** Stop the attached conversation's run, as Esc does, and withdraw what's queued. */
 	abort: { params: Record<string, never>; result: Record<string, never> };
 	compact: { params: { instructions?: string }; result: { task: TaskId } };
-	configure: { params: { thinkingLevel?: ModelThinkingLevel }; result: Record<string, never> };
+	/**
+	 * Change the attached conversation's model or thinking level. A thinking level the model
+	 * doesn't support is clamped to one it does, as pi does; the result says which.
+	 */
+	configure: {
+		params: { model?: { provider: string; modelId: string }; thinkingLevel?: ModelThinkingLevel };
+		result: { thinkingLevel?: ModelThinkingLevel };
+	};
+	/** The models the daemon can run: those whose provider has its credentials. */
+	models: { params: Record<string, never>; result: { models: ModelSummary[] } };
+	/**
+	 * Fork the attached conversation just before its user message `before`, as pi's `/fork`
+	 * does: the new conversation's history runs up to that message, which the client can
+	 * edit and send again. The client attaches to it by number.
+	 */
+	fork: { params: { before: EntryId }; result: { number: number } };
 	/**
 	 * What the client can't see of a model: its context window, from the daemon's model
 	 * catalog, for the footer's context gauge. Undefined for a model the daemon doesn't know.

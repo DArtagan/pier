@@ -30,40 +30,50 @@ was found and measured, in `docs/history.md`.
 - It stays in pier, beside the daemon: clients render Durable's own view, so they
   must ship with the daemon they talk to.
 
-## Left of rendering
+## Images: placeholders only, in Will's terminal
 
-- **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
-  Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
-  be placeholders there.
+Checked 2026-11-16:
+
+- **Alacritty 0.17 has no image protocol.** Asked directly (outside tmux), it answers
+  neither Kitty's graphics query nor iTerm2's, and its DA1 reply (`ESC[?6c`) lists no
+  sixel. pi-tui's detection agrees: Alacritty gets `images: null`.
+- **tmux hides images anyway**: pi-tui gives every pane under `TMUX` `images: null`,
+  whatever the terminal outside.
+- **What pier draws** (offline, with pi-tui's capabilities pinned): with no protocol, a
+  `read` of an image shows its call, and its image only when expanded, as pi's
+  `[Image: [image/png] 2x2]` placeholder; a user message's image shows as `[image]`.
+  With Kitty claimed, pi's component sends the Kitty escape. Nothing for pier to build
+  until Will's terminal can show one.
 
 ## pi's habits
 
-Will reviews this list first, and throws out what he doesn't really use.
+Will's review, 2026-11-16: the autocomplete menu, `/model`, `/thinking`, `/resume`,
+`/fork`, `/tree` and Alt+Up are built (`README.md`, "Use"). Left, not chosen yet:
 
 - **Will's keybindings and settings** from `~/.pi/agent/keybindings.json` and
   `settings.json`. His keybindings remap follow-up to Ctrl+Shift+Enter and Alt+Enter,
-  which pier happens to use already. pier reads `theme` and `hideThinkingBlock`, not
-  `tuiMode`, `fullscreenCopyOnSelect` or `fullscreenWheelScrollLines`. pi's app-level
+  which pier happens to use already. pier reads `theme`, `hideThinkingBlock`,
+  `showHardwareCursor` and `autocompleteMaxVisible`, not `tuiMode`,
+  `fullscreenCopyOnSelect` or `fullscreenWheelScrollLines`. pi's app-level
   `KeybindingsManager`, with pi's action names, isn't exported in 1.5.2; pier adds the
-  three it needs to pi-tui's (`installKeybindings` in `src/host/tool-calls.ts`).
-- **`/model`.** pi's `ModelSelectorComponent` needs a `ModelRuntime`, which lives in the
-  daemon. It needs a `models` request in the protocol, and either an adapted picker or
-  pier's own list.
-- **Thinking level as a picker** (`ThinkingSelectorComponent`) rather than
-  `/thinking <level>`.
+  ones it uses to pi-tui's (`installKeybindings` in `src/host/tool-calls.ts`).
 - **`!command`:** run a shell command in the conversation's directory and environment,
   in the daemon, and show the output. Durable's `bash` tool could run it (as a user
   bash entry), or the daemon could run it directly.
 - **`@file` completion.** The client runs in the pane, in the conversation's
   directory, so it can list files itself. pi-tui's `CombinedAutocompleteProvider`
   handles slash commands and paths.
-- **Editor:** persistent history across sessions, an external editor (Ctrl+G in pi),
-  image paste.
-- **A picker for `/resume`.** pi's `SessionSelectorComponent` expects pi's session
-  files; pier would feed its own list into a pi-tui `SelectList`.
-- **`/fork` and `/tree`.** A Durable fork is a new conversation from an entry
-  (`conversation.fork(entryId)`). pi's `TreeSelectorComponent` expects pi's session
-  tree. This needs a protocol request and a way to pick the entry.
+- **Editor:** three of pi's editor features.
+  - History across sessions. pi fills the editor's Up-arrow history from the session's
+    own messages when it opens one; pier's starts empty each time the client starts.
+  - An external editor: Ctrl+G opens the editor's text in `$VISUAL`/`$EDITOR`, and
+    takes back what's saved.
+  - Image paste: Ctrl+V pastes an image from the clipboard as an attachment. Moot
+    while Alacritty can't show images, though Claude could still see them.
+- **`/fork` and `/tree` that move within one conversation**, as pi's do. pier's make a
+  conversation per branch, which keeps each branch's prompt cache; pi's
+  `TreeSelectorComponent` and `UserMessageSelectorComponent` expect pi's session tree,
+  so pier's menus are its own lists in pi-tui's autocomplete.
 
 ## Prior art
 
