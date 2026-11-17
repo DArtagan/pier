@@ -68,7 +68,8 @@ The two jobs that last and the one that doesn't live apart:
   - The Nix module and user service, which become the way to run p3 on Will's hosts
     once p3 ships as a package.
 - **Building by Will's decision, though it won't carry over:**
-  - the terminal client, made good for daily use (`todos/tui.md`);
+  - the terminal client, made good for daily use (done 2026-11-17; `docs/history.md`,
+    "The terminal client, for daily use"), changed further as daily use asks;
   - a web UI on Elanor, reachable locally and over the tailnet, phone first
     (`todos/web.md`). Will, 2026-11-16: what Earendil will build is unclear, and he
     wants it sooner. If p3's web UI covers most of the same ground, pier's is
