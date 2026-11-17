@@ -110,7 +110,7 @@ describe("working line", () => {
 		const working = new WorkingLine(ui, shown);
 		expect(top(shown)).toMatch(/^─+$/);
 		working.update(true);
-		expect(top(shown)).toMatch(/^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working \(escape to interrupt\) ─+$/);
+		expect(top(shown)).toMatch(/^── [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Working ─+$/);
 		const first = top(shown);
 		vi.advanceTimersByTime(80);
 		expect(top(shown)).not.toBe(first);

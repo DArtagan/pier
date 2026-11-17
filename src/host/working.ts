@@ -1,10 +1,10 @@
-// pi's "Working" line while a run goes: a spinner and "Working (escape to interrupt)",
-// drawn into the editor's top border by pi's own `CustomEditor` (`embedWorkingStatus`),
-// in the border's color, as pi draws it. pi's `WorkingStatusIndicator` isn't exported in
-// 1.5.2, so this is the same on pi-tui's `Loader`, which it extends, with its two
-// border methods; the editor calls only those.
+// pi's "Working" line while a run goes: a spinner and "Working", drawn into the editor's
+// top border by pi's own `CustomEditor` (`embedWorkingStatus`), in the border's color, as
+// pi draws it, without pi's "(escape to interrupt)" (Will, 2026-11-16). pi's
+// `WorkingStatusIndicator` isn't exported in 1.5.2, so this is the same on pi-tui's
+// `Loader`, which it extends, with its two border methods; the editor calls only those.
 import type { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { getKeybindings, Loader, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
+import { Loader, type TUI, truncateToWidth } from "@earendil-works/pi-tui";
 import { colorer } from "./colors.ts";
 
 type Indicator = Parameters<CustomEditor["setWorkingStatusIndicator"]>[0];
@@ -13,7 +13,7 @@ class WorkingIndicator extends Loader {
 	readonly kind = "working";
 
 	constructor(ui: TUI, color: (text: string) => string) {
-		super(ui, color, colorer("muted"), `Working (${interruptKey()} to interrupt)`);
+		super(ui, color, colorer("muted"), "Working");
 	}
 
 	/** As pi's `StatusIndicator.renderInBorder`. */
@@ -30,11 +30,6 @@ class WorkingIndicator extends Loader {
 	dispose(): void {
 		this.stop();
 	}
-}
-
-/** Esc, as pi names its `app.interrupt` key; pier's Esc stops the run too. */
-function interruptKey(): string {
-	return getKeybindings().getKeys("app.interrupt")[0] ?? "escape";
 }
 
 /** The working line in `editor`'s border: shown while a run goes, gone when it ends. */

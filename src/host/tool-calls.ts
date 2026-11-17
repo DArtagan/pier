@@ -36,8 +36,8 @@ export const EXPAND_TOOLS = "app.tools.expand";
 export const TOGGLE_THINKING = "app.thinking.toggle";
 
 /**
- * pi-tui's keybindings, plus the three of pi's that pier's screen names, with pi's keys: Ctrl+O,
- * Ctrl+T and Esc. pi's own app keymap (`KEYBINDINGS`) isn't exported in 1.5.2; without these,
+ * pi-tui's keybindings, plus pi's two the transcript uses, with pi's keys: Ctrl+O and
+ * Ctrl+T. pi's own app keymap (`KEYBINDINGS`) isn't exported in 1.5.2; without these,
  * pi's components' hints ("… more lines, ctrl+o to expand") name no key.
  */
 export function installKeybindings(): void {
@@ -46,8 +46,6 @@ export function installKeybindings(): void {
 			...TUI_KEYBINDINGS,
 			[EXPAND_TOOLS]: { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 			[TOGGLE_THINKING]: { defaultKeys: "ctrl+t", description: "Toggle thinking blocks" },
-			// What pi's working line names as the key that stops a run; pier's Esc does that.
-			"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
 		}),
 	);
 }
