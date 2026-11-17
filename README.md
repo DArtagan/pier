@@ -83,7 +83,8 @@ of the last pane that attached to it.
 
 The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
 `$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
-(`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override them.
+(`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override them. The daemon
+refuses to start with a model it can't run, or a thinking level that isn't pi's.
 
 ## Layout
 
@@ -95,9 +96,10 @@ The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
   - `prompt.ts` builds the system prompt from AGENTS.md files and skills, found the way
     pi finds them.
 - `src/host/` is what's thrown away when p3 takes over: `daemon.ts` runs the Harness and
-  serves it on the socket, `protocol.ts` is what goes over it, `client.ts` and `tui.ts`
-  are the client (`commands.ts` its slash commands and their menus), and `cli.ts` is
-  `pier`.
+  serves it on the socket, `protocol.ts` is what goes over it (the daemon checks each
+  request against its schemas), `client.ts` and `tui.ts` are the client (`commands.ts`
+  its slash commands and their menus), and `cli.ts` is `pier` (`defaults.ts` the model
+  it runs).
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.

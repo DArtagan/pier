@@ -46,6 +46,7 @@ import {
 	type Methods,
 	type ModelSummary,
 	PROTOCOL_VERSION,
+	parseRequest,
 	type Request,
 	type Response,
 } from "./protocol.ts";
@@ -124,7 +125,11 @@ const context: Context = BACKGROUND_CONTEXT;
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	const log = options.log ?? (() => {});
-	// First, so a second daemon gives up before it touches any storage.
+	const model = options.model;
+	if (options.models.getModel(model.provider, model.modelId) === undefined) {
+		throw new Error(`No model ${model.provider}/${model.modelId}`);
+	}
+	// Before any storage, so a second daemon gives up before it touches it.
 	await claimSocket(options.socketPath);
 	const registry = createRegistry();
 	registry.install(CodingTools);
@@ -139,7 +144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			registry,
 			env: async ({ conversationId, cwd, read }, envContext) => {
 				const vars = (await read.snapshot(ClientEnvDoc, conversationId, envContext))?.vars;
-				return new NodeExecutionEnv({ cwd: cwd ?? homedir(), shellEnv: vars });
+				return new NodeExecutionEnv({ cwd: cwd ?? homedir(), ...(vars === undefined ? {} : { shellEnv: vars }) });
 			},
 			// A bash call batched with a write or edit runs after it, not beside it.
 			settings: { toolExecution: "sequential" },
@@ -284,7 +289,11 @@ class ConversationAccess {
 		const conversation = await this.harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
-				agent: { model: this.#options.model, thinkingLevel: this.#options.thinkingLevel, cwd },
+				agent: {
+					model: this.#options.model,
+					...(this.#options.thinkingLevel === undefined ? {} : { thinkingLevel: this.#options.thinkingLevel }),
+					cwd,
+				},
 				init: async (tx, id) => {
 					number = assign(await tx.doc(NumbersDoc), id);
 				},
@@ -485,13 +494,19 @@ class Connection {
 	}
 
 	async #receive(data: RawData): Promise<void> {
-		let request: Request;
+		let message: unknown;
 		try {
-			request = JSON.parse(data.toString()) as Request;
+			message = JSON.parse(data.toString());
 		} catch {
 			this.#send({ id: -1, error: { message: "Not JSON" } });
 			return;
 		}
+		const parsed = parseRequest(message);
+		if ("error" in parsed) {
+			this.#send({ id: parsed.id, error: { message: parsed.error } });
+			return;
+		}
+		const { request } = parsed;
 		try {
 			const result = await this.#handle(request);
 			this.#send({ id: request.id, result });

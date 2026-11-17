@@ -6,31 +6,119 @@
 // `applyImmutable` from `@earendil-works/chord/delta`. The view is Durable's own, so this
 // protocol is only an envelope: when Durable's view changes shape, clients do too, and
 // they ship with the daemon.
+//
+// A request's params are JSON Schema (pi-schema), which the daemon checks every request
+// against before it acts on one; their types are the schemas'. Responses and events
+// aren't checked: the client trusts the daemon it said hello to.
 import type { Op } from "@earendil-works/chord/delta";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { ModelThinkingLevelSchema } from "@earendil-works/pi-ai/providers/model-schema";
 import type {
 	ConversationId,
 	ConversationView,
-	ConversationWindow,
 	Cursor,
 	EntryId,
 	EntryRecord,
 	SubmissionId,
 	TaskId,
 } from "@earendil-works/pi-durable";
+import {
+	compile,
+	int,
+	lit,
+	map,
+	obj,
+	oneOf,
+	opt,
+	type Static,
+	str,
+	union,
+	unknown,
+	unsafe,
+	type ValidationError,
+	type Validator,
+} from "@earendil-works/pi-schema";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
 export const PROTOCOL_VERSION = 5;
 
+// Durable's ids are branded numbers.
+const conversationId = unsafe<ConversationId>(int({ minimum: 0 }));
+const entryId = unsafe<EntryId>(int({ minimum: 0 }));
+const none = obj({});
+const modelRef = obj({ provider: str({ minLength: 1 }), modelId: str({ minLength: 1 }) });
+
 /** Which conversation `attach` opens. */
-export type AttachTarget =
-	| { readonly kind: "new" }
-	/** The newest conversation in the client's directory, or a new one if there's none. */
-	| { readonly kind: "continue" }
-	/** By the number pier gave it: #1, #2, … on this host. */
-	| { readonly kind: "number"; readonly number: number }
-	/** By Durable's own id, which clients use to reattach; it isn't shown to people. */
-	| { readonly kind: "id"; readonly id: ConversationId };
+const AttachTarget = union([
+	obj({ kind: lit("new") }),
+	// The newest conversation in the client's directory, or a new one if there's none.
+	obj({ kind: lit("continue") }),
+	// By the number pier gave it: #1, #2, … on this host.
+	obj({ kind: lit("number"), number: int({ minimum: 1 }) }),
+	// By Durable's own id, which clients use to reattach; it isn't shown to people.
+	obj({ kind: lit("id"), id: conversationId }),
+]);
+export type AttachTarget = Static<typeof AttachTarget>;
+
+/** Durable's `ConversationWindow`, as its documentation bounds it. */
+const ConversationWindow = obj({
+	from: opt(entryId),
+	min: opt(int({ minimum: 1 })),
+	max: opt(int({ minimum: 1 })),
+});
+
+/** Every request's params, by method. */
+const Params = {
+	hello: obj({ version: int() }),
+	/**
+	 * Attach this connection to a conversation, replacing any earlier attachment. `env` is
+	 * the client's whole environment; the conversation's tools run with it from now on.
+	 * `window` resumes a transcript after a dropped connection (`ConversationTranscript.resume`).
+	 */
+	attach: obj({ target: AttachTarget, cwd: str({ minLength: 1 }), env: map(str()), window: opt(ConversationWindow) }),
+	detach: none,
+	/** Send input. While a run is going, `steer` joins it and `followUp` (the default) waits for it. */
+	submit: obj({ text: str(), whenBusy: opt(oneOf(["steer", "followUp"])) }),
+	/**
+	 * Withdraw the attached conversation's queued messages, as pi's Alt+Up does, and return
+	 * their text, oldest first, for the editor. One the run took in meanwhile stays sent.
+	 */
+	dequeue: none,
+	/** Stop the attached conversation's run, as Esc does, and withdraw what's queued. */
+	abort: none,
+	compact: obj({ instructions: opt(str()) }),
+	/**
+	 * Change the attached conversation's model or thinking level. A thinking level the model
+	 * doesn't support is clamped to one it does, as pi does; the result says which.
+	 */
+	configure: obj({ model: opt(modelRef), thinkingLevel: opt(ModelThinkingLevelSchema) }),
+	/** The models the daemon can run: those whose provider has its credentials. */
+	models: none,
+	/**
+	 * Fork the attached conversation just before its user message `before`, as pi's `/fork`
+	 * does: the new conversation's history runs up to that message, which the client can
+	 * edit and send again. The client attaches to it by number.
+	 */
+	fork: obj({ before: entryId }),
+	/**
+	 * What the client can't see of a model: its context window, from the daemon's model
+	 * catalog, for the footer's context gauge. Undefined for a model the daemon doesn't know.
+	 */
+	model: modelRef,
+	/** Conversations, newest first, in one directory if `cwd` is given. */
+	list: obj({ cwd: opt(str()), limit: opt(int({ minimum: 1 })) }),
+	/**
+	 * A page of the attached conversation's entries, for `ConversationTranscript`'s loader.
+	 * `next` is Durable's cursor, present when more entries match: the transcript takes a
+	 * page without one to mean it reached the start, or that a gap is filled.
+	 */
+	entries: obj({
+		minEntryId: opt(entryId),
+		maxEntryId: opt(entryId),
+		order: opt(oneOf(["ascending", "descending"])),
+		limit: int({ minimum: 1 }),
+	}),
+};
 
 export interface ConversationSummary {
 	readonly id: ConversationId;
@@ -61,74 +149,57 @@ export interface ModelSummary {
 	readonly thinkingLevels: readonly ModelThinkingLevel[];
 }
 
-/** Every request, by method: its params and its result. */
-export interface Methods {
-	hello: { params: { version: number }; result: { version: number; pid: number } };
-	/**
-	 * Attach this connection to a conversation, replacing any earlier attachment. `env` is
-	 * the client's whole environment; the conversation's tools run with it from now on.
-	 * `window` resumes a transcript after a dropped connection (`ConversationTranscript.resume`).
-	 */
-	attach: {
-		params: {
-			target: AttachTarget;
-			cwd: string;
-			env: Record<string, string>;
-			window?: ConversationWindow;
-		};
-		result: { conversation: ConversationId; number: number; created: boolean };
-	};
-	detach: { params: Record<string, never>; result: Record<string, never> };
-	/** Send input. While a run is going, `steer` joins it and `followUp` (the default) waits for it. */
-	submit: {
-		params: { text: string; whenBusy?: "steer" | "followUp" };
-		result: { submission: SubmissionId };
-	};
-	/**
-	 * Withdraw the attached conversation's queued messages, as pi's Alt+Up does, and return
-	 * their text, oldest first, for the editor. One the run took in meanwhile stays sent.
-	 */
-	dequeue: { params: Record<string, never>; result: { texts: string[] } };
-	/** Stop the attached conversation's run, as Esc does, and withdraw what's queued. */
-	abort: { params: Record<string, never>; result: Record<string, never> };
-	compact: { params: { instructions?: string }; result: { task: TaskId } };
-	/**
-	 * Change the attached conversation's model or thinking level. A thinking level the model
-	 * doesn't support is clamped to one it does, as pi does; the result says which.
-	 */
-	configure: {
-		params: { model?: { provider: string; modelId: string }; thinkingLevel?: ModelThinkingLevel };
-		result: { thinkingLevel?: ModelThinkingLevel };
-	};
-	/** The models the daemon can run: those whose provider has its credentials. */
-	models: { params: Record<string, never>; result: { models: ModelSummary[] } };
-	/**
-	 * Fork the attached conversation just before its user message `before`, as pi's `/fork`
-	 * does: the new conversation's history runs up to that message, which the client can
-	 * edit and send again. The client attaches to it by number.
-	 */
-	fork: { params: { before: EntryId }; result: { number: number } };
-	/**
-	 * What the client can't see of a model: its context window, from the daemon's model
-	 * catalog, for the footer's context gauge. Undefined for a model the daemon doesn't know.
-	 */
-	model: { params: { provider: string; modelId: string }; result: { contextWindow?: number } };
-	/** Conversations, newest first, in one directory if `cwd` is given. */
-	list: { params: { cwd?: string; limit?: number }; result: { conversations: ConversationSummary[] } };
-	/**
-	 * A page of the attached conversation's entries, for `ConversationTranscript`'s loader.
-	 * `next` is Durable's cursor, present when more entries match: the transcript takes a
-	 * page without one to mean it reached the start, or that a gap is filled.
-	 */
-	entries: {
-		params: { minEntryId?: EntryId; maxEntryId?: EntryId; order?: "ascending" | "descending"; limit: number };
-		result: { entries: EntryRecord[]; next?: Cursor };
-	};
+/** Every request's result, by method. */
+interface Results {
+	hello: { version: number; pid: number };
+	attach: { conversation: ConversationId; number: number; created: boolean };
+	detach: Record<string, never>;
+	submit: { submission: SubmissionId };
+	dequeue: { texts: string[] };
+	abort: Record<string, never>;
+	compact: { task: TaskId };
+	configure: { thinkingLevel?: ModelThinkingLevel };
+	models: { models: ModelSummary[] };
+	fork: { number: number };
+	model: { contextWindow?: number };
+	list: { conversations: ConversationSummary[] };
+	entries: { entries: EntryRecord[]; next?: Cursor };
 }
 
-export type Method = keyof Methods;
+export type Method = keyof typeof Params & keyof Results;
+
+/** Every request, by method: its params and its result. */
+export type Methods = { [M in Method]: { params: Static<(typeof Params)[M]>; result: Results[M] } };
 
 export type Request = { [M in Method]: { id: number; method: M; params: Methods[M]["params"] } }[Method];
+
+const envelope = compile(obj({ id: int(), method: oneOf(Object.keys(Params) as Method[]), params: unknown() }));
+const paramsOf = Object.fromEntries(
+	Object.entries(Params).map(([method, schema]) => [method, compile(schema)]),
+) as unknown as { [M in Method]: Validator<Methods[M]["params"]> };
+
+/**
+ * `message`, a parsed JSON message from a client, as a request; else why it isn't one,
+ * and its `id` if it has one, for the error response.
+ */
+export function parseRequest(message: unknown): { request: Request } | { id: number; error: string } {
+	if (!envelope.check(message)) {
+		const id = (message as { id?: unknown } | null)?.id;
+		return {
+			id: Number.isInteger(id) ? (id as number) : -1,
+			error: `Not a request: ${describe(envelope.errors(message))}`,
+		};
+	}
+	const params = paramsOf[message.method];
+	if (!params.check(message.params)) {
+		return { id: message.id, error: `Bad params for ${message.method}: ${describe(params.errors(message.params))}` };
+	}
+	return { request: message as Request };
+}
+
+function describe(errors: readonly ValidationError[]): string {
+	return errors.map((error) => `${error.path === "" ? "/" : error.path} ${error.message}`).join("; ");
+}
 
 export type Response = { id: number; result: unknown } | { id: number; error: { message: string } };
 

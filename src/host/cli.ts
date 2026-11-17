@@ -9,12 +9,12 @@
 // The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock.
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { CLAUDE_CODE_PROVIDER, loadClaudeCodeProvider } from "../layer/claude-code.ts";
+import { loadClaudeCodeProvider } from "../layer/claude-code.ts";
 import { PierClient } from "./client.ts";
 import { startDaemon } from "./daemon.ts";
+import { defaultModel, defaultThinkingLevel } from "./defaults.ts";
 import { socketPath, stateDir } from "./paths.ts";
 import type { AttachTarget } from "./protocol.ts";
 import { runTui, type TuiMode, takeTuiMode } from "./tui.ts";
@@ -103,6 +103,9 @@ function environment(): Record<string, string> {
 
 async function daemon(): Promise<number> {
 	const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
+	// Read first, so a mistake in either stops the daemon before it does anything.
+	const model = defaultModel();
+	const thinkingLevel = defaultThinkingLevel();
 	const state = stateDir();
 	await mkdir(state, { recursive: true, mode: 0o700 });
 	// pi-claude-code runs Claude Code in the conversation's directory (ConversationDirectories),
@@ -111,14 +114,12 @@ async function daemon(): Promise<number> {
 	process.chdir(state);
 	const models = await ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
 	models.registerNativeProvider(await loadClaudeCodeProvider());
-	// PIER_MODEL is `provider/model`; Claude through Claude Code by default.
-	const [provider, ...model] = (process.env.PIER_MODEL ?? `${CLAUDE_CODE_PROVIDER}/claude-opus-5-5`).split("/");
 	const running = await startDaemon({
 		socketPath: socketPath(),
 		storage: await openNodeSqliteStorage(join(state, "pier.sqlite")),
 		models,
-		model: { provider: provider ?? CLAUDE_CODE_PROVIDER, modelId: model.join("/") },
-		thinkingLevel: (process.env.PIER_THINKING ?? "high") as ModelThinkingLevel,
+		model,
+		thinkingLevel,
 		log,
 	});
 	log(`storage ${join(state, "pier.sqlite")}`);
