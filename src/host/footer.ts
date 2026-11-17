@@ -9,11 +9,14 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { calculateContextTokens } from "@earendil-works/pi-coding-agent";
 import type { AgentState, TranscriptView, UsageState } from "@earendil-works/pi-durable";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { colorer } from "./colors.ts";
 
-const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
-const dim = sgr(2, 22);
-const red = sgr(31, 39);
-const yellow = sgr(33, 39);
+// In pi's theme colors, as pi's footer and pi-quotas draw theirs: pi's footer in its
+// "dim" grey, the plan's room left in "success" green, amber and red as it runs out.
+const dim = colorer("dim");
+const red = colorer("error");
+const yellow = colorer("warning");
+const green = colorer("success");
 
 /** What the footer draws, gathered from the view by `footerState`. */
 export interface FooterState {
@@ -157,10 +160,11 @@ function planWindow(window: PlanWindow, now: number): string {
 	const used = window.utilization * 100;
 	const left = Math.max(0, Math.min(100, Math.round(100 - used)));
 	const limited = window.status !== undefined && window.status !== "allowed";
-	const color = limited || used >= 90 ? red : used >= 80 ? yellow : undefined;
-	// The label is dim while there's room, and takes the warning's colour once there isn't.
-	const label = (color ?? dim)(`${window.label}:`);
-	const value = color === undefined ? `${left}% left` : color(`${left}% left`);
+	const warning = limited || used >= 90 ? red : used >= 80 ? yellow : undefined;
+	// As pi-quotas: the label dim while there's room, the value green; both take the
+	// warning's color once there isn't.
+	const label = (warning ?? dim)(`${window.label}:`);
+	const value = (warning ?? green)(`${left}% left`);
 	const reset = window.resetsAt === undefined ? "" : dim(` (↺in ${formatTimeRemaining(window.resetsAt * 1000 - now)})`);
 	return `${label}${value}${reset}`;
 }
@@ -173,8 +177,11 @@ export function footerLines(
 ): string[] {
 	const now = options.now ?? Date.now();
 	const where = state.cwd === undefined ? "" : formatCwd(state.cwd, options.home);
-	const first = [options.status, where].filter(Boolean).join(dim(" · "));
-	const lines = [truncateToWidth(dim(first), width, dim("..."))];
+	// Each part dimmed by itself: a status in its own color (reconnecting…) would end an
+	// outer dim, leaving the rest in the terminal's default.
+	const heading = [options.status ?? "", where].filter((part) => part !== "");
+	const first = heading.map((part) => dim(part)).join(dim(" · "));
+	const lines = [truncateToWidth(first, width, dim("..."))];
 
 	const parts: string[] = [];
 	const { tokens } = state;

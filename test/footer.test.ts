@@ -1,8 +1,10 @@
 // The terminal client's footer: what it takes from Durable's documents and from
 // pi-claude-code's rate-limit diagnostic, and how it lays them out, as pi's and pi-quotas' do.
 import { stripVTControlCharacters } from "node:util";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 import type { EntryId, EntryRecord, TranscriptView } from "@earendil-works/pi-durable";
 import { describe, expect, it } from "vitest";
+import { color } from "../src/host/colors.ts";
 import { footerLines, footerState, formatCwd, formatTimeRemaining, planWindows } from "../src/host/footer.ts";
 
 // As pi-claude-code passed it on, on an answer of Will's (2026-11-16).
@@ -69,6 +71,8 @@ const plain = (lines: string[]) => lines.map((line) => stripVTControlCharacters(
 const NOW = (1794888000 - 2 * 3600 - 5 * 60) * 1000;
 
 describe("footer", () => {
+	initTheme();
+
 	it("takes the plan's windows from pi-claude-code's rate-limit diagnostic", () => {
 		expect(planWindows(rateLimit)).toEqual({
 			windows: [
@@ -103,16 +107,31 @@ describe("footer", () => {
 
 	it("turns the gauge and a window amber, then red, as they fill", () => {
 		const nearlyFull = footerState(view([answer({ ...usage, totalTokens: 190000 })]), 200000);
-		expect(footerLines(nearlyFull, 100)[1]).toContain("\x1b[31m95.0%/200k");
+		expect(footerLines(nearlyFull, 100)[1]).toContain(color("error", "95.0%/200k"));
 		const filling = {
 			...rateLimit,
 			unifiedWindows: { five_hour: { utilization: 0.85, resetsAt: 1794888000, status: "allowed" } },
 		};
 		const amber = footerState(view([answer(usage, [{ type: "claude-code.rate-limit", details: filling }])]), 200000);
-		expect(footerLines(amber, 100, { now: NOW })[2]).toContain("\x1b[33m15% left");
+		expect(footerLines(amber, 100, { now: NOW })[2]).toContain(color("warning", "15% left"));
 		const charged = { ...rateLimit, isUsingOverage: true };
 		const credits = footerState(view([answer(usage, [{ type: "claude-code.rate-limit", details: charged }])]), 200000);
 		expect(plain(footerLines(credits, 100, { now: NOW }))[2]).toContain("on usage credits");
+	});
+
+	it("draws the footer in pi's grey, and the plan's room left in green, as pi and pi-quotas do", () => {
+		const state = footerState(
+			view([answer(usage, [{ type: "claude-code.rate-limit", timestamp: 0, details: rateLimit }])]),
+			200000,
+		);
+		const lines = footerLines(state, 100, { home: "/home/will", status: "ready", now: NOW });
+		// Every line starts in pi's dim grey; the plan's value is in its success green.
+		const grey = color("dim", "|").split("|")[0] ?? "";
+		expect(grey).not.toBe("");
+		for (const line of lines) expect(line.startsWith(grey)).toBe(true);
+		expect(lines[1]).toContain(color("dim", "↑12"));
+		expect(lines[2]).toContain(color("success", "86% left"));
+		expect(lines[2]).toContain(color("dim", "5h:"));
 	});
 
 	it("draws no plan line without the diagnostic, and fits a narrow terminal", () => {

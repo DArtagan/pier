@@ -7,6 +7,7 @@ import type { AssistantMessage, Message, ToolResultMessage } from "@earendil-wor
 import {
 	AssistantMessageComponent,
 	CompactionSummaryMessageComponent,
+	CustomEditor,
 	calculateContextTokens,
 	copyToClipboard,
 	getMarkdownTheme,
@@ -26,7 +27,6 @@ import type {
 import {
 	type Component,
 	Container,
-	Editor,
 	getKeybindings,
 	type MarkdownTheme,
 	matchesKey,
@@ -40,10 +40,13 @@ import {
 	VStack,
 } from "@earendil-works/pi-tui";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./client.ts";
+import { color, editorBorder } from "./colors.ts";
 import { Footer, footerState } from "./footer.ts";
 import { type AttachTarget, type ConversationSummary, DAEMON_CLOSING } from "./protocol.ts";
 import { startTheme } from "./theme.ts";
 import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
+import { type Turn, turnEndingAt, turnLine } from "./turn-line.ts";
+import { WorkingLine } from "./working.ts";
 
 const sgr = (open: number, close: number) => (text: string) => `\x1b[${open}m${text}\x1b[${close}m`;
 const dim = sgr(2, 22);
@@ -112,13 +115,25 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const tui = options.mode === "fullscreen" ? fullscreen(terminal) : new TuiMainScreen(terminal);
 	const transcript = new Container();
 	const notices = new Text("", 1, 0);
+	// A blank line between the transcript and what's under it, as pi leaves one.
+	const gap = new Spacer(1);
 	const footer = new Footer(process.env.HOME);
 	// The context window of the conversation's model, from the daemon, for the footer's gauge.
 	let contextWindow: { model: string; tokens: number | undefined } | undefined;
-	const editor = new Editor(tui, { borderColor: dim, selectList: getSelectListTheme() });
-	const components = [transcript, notices, editor, footer];
+	const editor = new CustomEditor(
+		tui,
+		{ borderColor: editorBorder(undefined), selectList: getSelectListTheme() },
+		// pi's app keymap class isn't exported in 1.5.2; pi-tui's (with pier's additions,
+		// `installKeybindings`) answers the same `matches` the editor asks.
+		getKeybindings() as ConstructorParameters<typeof CustomEditor>[2],
+		{
+			embedWorkingStatus: true,
+		},
+	);
+	const working = new WorkingLine(tui, editor);
+	const components = [transcript, gap, notices, editor, footer];
 	for (const component of components) tui.addChild(component);
-	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [notices], editor, [footer]));
+	if (tui instanceof TuiAltScreen) tui.setLayoutRoot(chatLayout(transcript, [gap, notices], editor, [footer]));
 	tui.setFocus(editor);
 
 	const rendered = new Map<EntryId, Component>();
@@ -162,7 +177,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const render = () => {
 		if (view === undefined) return;
 		fillTranscript(transcript, view, rendered, style);
-		footer.update(footerState(view, windowOf(view)), statusText(view, conversation.number, client.connected));
+		editor.borderColor = editorBorder((view.docs["pi.agent"] as AgentState | undefined)?.thinkingLevel);
+		working.update(busy() && client.connected);
+		footer.update(footerState(view, windowOf(view)), statusText(conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
 	};
@@ -199,7 +216,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		}
 		// The view can arrive before the reply that carries the number.
 		render();
-		notify(dim(`${created ? "new conversation" : "conversation"} #${conversation.number} in ${options.cwd}`));
+		// The footer says which conversation, and where; a new one says so once.
+		if (created) notify(dim(`new conversation #${conversation.number}`));
 	};
 
 	const submit = async (text: string, whenBusy: "steer" | "followUp") => {
@@ -376,15 +394,15 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	try {
 		await attach(options.target);
 		watchConnection(client);
-		notify(dim("/help lists the keys and commands"));
 	} catch (error) {
 		notify(red(errorText(error)));
 		leaving?.(1);
 	}
 	const code = await done;
 	left.abort();
-	// Stops the clocks of calls still running, which would keep the process alive.
+	// Stops the clocks of calls still running, and the spinner, which would keep the process alive.
 	style.clear();
+	working.update(false);
 	stopTheme();
 	if (tui instanceof TuiAltScreen) leaveFullscreen(tui, components);
 	else tui.stop();
@@ -554,7 +572,11 @@ export function fillTranscript(
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	// The context the last answer so far was sent with: what a compaction after it summarized.
 	let context: number | undefined;
+	// The loaded entries, in order, for the turn line after each run's final answer.
+	const entries = view.items.flatMap((item) => (item.kind === "entry" ? [item.entry] : []));
+	let at = -1;
 	for (const item of view.items) {
+		if (item.kind === "entry") at++;
 		if (item.kind === "entry") {
 			const message = item.entry.model?.[0];
 			// As pi's `getAssistantUsage`: failed answers, and ones without usage, don't count.
@@ -574,6 +596,9 @@ export function fillTranscript(
 			let component = rendered.get(item.entry.id);
 			if (component === undefined) {
 				component = renderEntry(item.entry, style, context);
+				// A final answer gets its turn's line, once its turn is all loaded; it never changes after.
+				const turn = turnEndingAt(entries, at);
+				if (turn !== undefined) component = withTurnLine(component, turn);
 				rendered.set(item.entry.id, component);
 			}
 			transcript.addChild(component);
@@ -655,6 +680,15 @@ function renderAssistant(message: AssistantMessage, style: TranscriptStyle, stor
 	return container;
 }
 
+/** `component`, then its turn's line, dim, as cachemire draws it: `◍ turn: 3 calls · 3s · …`. */
+function withTurnLine(component: Component, turn: Turn): Component {
+	const container = new Container();
+	container.addChild(component);
+	container.addChild(new Spacer(1));
+	container.addChild(new Text(color("dim", `◍ ${turnLine(turn)}`), 1, 0));
+	return container;
+}
+
 /** pi's components start with no blank line of their own; pi's chat puts a spacer before each. */
 function withSpace(component: Component): Component {
 	const container = new Container();
@@ -713,10 +747,10 @@ export function summaryLine(summary: ConversationSummary, withDirectory: boolean
 }
 
 /** The footer's first words: what the client is doing, and which conversation. */
-function statusText(view: TranscriptView, number: number | undefined, connected: boolean): string {
-	const working = (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined;
-	const doing = !connected ? yellow("reconnecting…") : working ? yellow("working… Esc stops") : "ready";
-	return `${doing}${dim(` · #${number ?? "?"}`)}`;
+function statusText(number: number | undefined, connected: boolean): string {
+	// A run going shows as pi's working line in the editor's border, not here.
+	const conversation = `#${number ?? "?"}`;
+	return connected ? conversation : `${yellow("reconnecting…")} · ${conversation}`;
 }
 
 function textParts(content: readonly { type: string; text?: string }[] | string): string {

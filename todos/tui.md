@@ -45,9 +45,13 @@ themes:
   entries. A gap left by a long outage fills itself.
 - **Live state:** the streaming answer, running tools with the last 6 lines of output,
   retries, compactions, queued input, and why a run failed.
-- **The footer,** under the editor, as pi's: working or ready, `#number` and the
-  directory; token totals, cost, the context gauge, model and thinking level; and the
-  Claude plan's 5-hour and 7-day windows, as pi-quotas shows them.
+- **The footer,** under the editor, as pi's, in pi's grey: `#number` and the directory;
+  token totals, cost, the context gauge, model and thinking level; and the Claude plan's
+  5-hour and 7-day windows, as pi-quotas shows them, green while there's room.
+- **pi's working line** in the editor's top border while a run goes (a spinner,
+  "Working (escape to interrupt)"), and a **turn line** after each run's answer, as
+  pine-of-glass's cachemire draws it in Will's classic pi:
+  `◍ turn: 3 calls · 9s · read 5.8k (99.9% cached) · wrote 1.2k · out 0.1k`.
 - **Keys:** Enter sends, and steers while a run is going; Alt+Enter or Ctrl+Shift+Enter
   queues a follow-up; Esc stops the run; Ctrl+C clears the editor, or leaves when it's
   empty, as Ctrl+D does.
@@ -243,14 +247,42 @@ In the order Will chose (below).
   the device attributes reply, as tmux answered none of OSC 10, 11 or 4, so no
   backgrounds showed there. So a pane no client shows may get no colors, and fall back
   to pi's blank panels; why wasn't checked.
+- **Polish, from Will's review** (2026-11-16): *"1. Remove the "/help lists the keys
+  and commands" message … 2. The "conversation #6 in …" line seems largely redundant to
+  the footer, remove it. 3. Follow pi's lead by rendering the footer in a gray. And the
+  (still largely available) quotas in a green. 4. Add some space between the editor
+  block and the output log. 5. Pi outputs something like how many calls were in the
+  last turn and how long the turn took … 6. Use a different color for the lines that
+  denote the editor box."* And: *"I like pi's "Working " animation and line while it's
+  thinking. Could we replicate that?"* Done the same day:
+  - No notices on attaching, but "new conversation #N" for a new one.
+  - pier's own text takes pi's theme colors (`src/host/colors.ts`, pi's `theme` read
+    from its `dist/` by path, as it isn't exported in 1.5.2): the footer in pi's
+    "dim", the plan's room left in "success", amber and red as before.
+  - A blank line between the transcript and the editor.
+  - The turn line is pine-of-glass's cachemire line (an extension of Will's, not core
+    pi, found by running classic pi in tmux), computed from Durable's stored answers:
+    each records when it started and how long it took, so a turn runs from the user's
+    message to the end of its last answer. It shows only once the whole turn is loaded,
+    and not after a failed run.
+  - The editor is pi's `CustomEditor`, with pi's working line embedded in its top border
+    (`src/host/working.ts`, on pi-tui's `Loader`, as pi's `WorkingStatusIndicator`
+    isn't exported), its lines in pi's thinking-level colors (`thinkingHigh` and so on).
+    The footer no longer says "working" or "ready"; it says "reconnecting…" when it is.
+
+  By hand in tmux with real Claude, the same day: the working line spun in the editor's
+  border through two bash calls and went when the run ended; the turn line read
+  `◍ turn: 3 calls · 9s · …` (a 6 s `sleep` among them); the border went from
+  `thinkingHigh`'s color to `thinkingLow`'s with `/thinking low`; the plan's values were
+  green; reattaching showed no notices.
 - **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
   Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
   be placeholders there.
 - **A footer: done** (2026-11-16, `src/host/footer.ts`). pi's `FooterComponent` takes
   classic pi's `AgentSession`, so pier draws its own, laid out as pi's and placed as
   pi's `createChatViewport` places it, under the editor:
-  - `ready · #3 · ~/repositories/pier`: what the client is doing (it replaced pier's
-    status line), the conversation, the directory.
+  - `#3 · ~/repositories/pier`: the conversation and the directory (it replaced pier's
+    status line; "ready" and "working" went with the polish below).
   - `↑12 ↓3.4k R250k W9.0k $0.140 (sub) 25.5%/200k`, then the model and thinking level
     on the right: pi's token totals (from `pi.usage`, every model the conversation
     used), its cost with pi's "(sub)" for a subscription, and its context gauge, amber
