@@ -11,7 +11,13 @@ import {
 	ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
 import type { EntryId, EntryRecord, LiveState, TranscriptView } from "@earendil-works/pi-durable";
-import { type Component, Container } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	Container,
+	setCapabilityOverrides,
+	type Terminal,
+	TuiMainScreen,
+} from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startTheme } from "../src/host/theme.ts";
 import { installKeybindings, isExpandKey, isThinkingKey, ToolCalls } from "../src/host/tool-calls.ts";
@@ -292,7 +298,7 @@ describe("answers, thinking and summaries", () => {
 
 describe("theme", () => {
 	// A TUI that answers the color query as a dark terminal does.
-	const terminal = (colors: object) =>
+	const answering = (colors: object) =>
 		({
 			requestRender() {},
 			invalidate() {},
@@ -300,6 +306,8 @@ describe("theme", () => {
 			onTerminalColorSchemeChange: () => () => {},
 			queryTerminalColors: async () => colors,
 		}) as unknown as Parameters<typeof startTheme>[0];
+	const dark = { background: { r: 24, g: 24, b: 24 }, foreground: { r: 220, g: 220, b: 220 } };
+	/** A finished bash call's first line inside its block, where pi paints the block's background. */
 	const panel = () => {
 		const component = new ToolExecutionComponent(
 			"bash",
@@ -313,22 +321,83 @@ describe("theme", () => {
 		component.updateResult({ content: [{ type: "text", text: "a" }], isError: false, durationMs: 1 });
 		return component.render(20)[1] ?? "";
 	};
+	// Escape codes for a background: an exact color (`ESC[48;2;R;G;Bm`), the nearest of the
+	// terminal's 256 (`ESC[48;5;Nm`), or the terminal's own default, no color (`ESC[49m`).
+	const TRUE_COLOR = "\x1b[48;2;";
+	const COLORS_256 = "\x1b[48;5;";
+	const DEFAULT = "\x1b[49m";
 
-	afterEach(() => initTheme());
+	afterEach(() => {
+		// Back to what the environment says, and pi's theme without the terminal's colors.
+		setCapabilityOverrides({});
+		initTheme();
+	});
 
-	it("colors tool blocks from the terminal's own colors, as pi does", async () => {
-		const stop = await startTheme(
-			terminal({ background: { r: 24, g: 24, b: 24 }, foreground: { r: 220, g: 220, b: 220 } }),
-			SettingsManager.inMemory(),
-			() => {},
-		);
+	it("colors tool blocks with pi's exact shade, where the terminal takes 24-bit color", async () => {
+		setCapabilityOverrides({ trueColor: true });
+		const stop = await startTheme(answering(dark), SettingsManager.inMemory(), () => {});
 		try {
-			// A background on a finished call, pi's success shade: 24-bit where the terminal
-			// says it takes it (COLORTERM), else the nearest of 256. Without the terminal's
-			// colors, pi leaves the panel's background as the terminal's default (49).
-			expect(panel()).toMatch(/\[48;[25];/);
+			expect(panel()).toContain(TRUE_COLOR);
 		} finally {
 			stop();
+		}
+	});
+
+	it("colors them with the nearest of 256, where it doesn't", async () => {
+		setCapabilityOverrides({ trueColor: false });
+		const stop = await startTheme(answering(dark), SettingsManager.inMemory(), () => {});
+		try {
+			expect(panel()).toContain(COLORS_256);
+			expect(panel()).not.toContain(TRUE_COLOR);
+		} finally {
+			stop();
+		}
+	});
+
+	it("starts within pi's timeout, uncolored, when the terminal never answers", async () => {
+		setCapabilityOverrides({ trueColor: true });
+		// A real pi-tui screen on a terminal that swallows the query, as a tmux pane no
+		// client shows did: pi-tui gives up after pi's 100 ms.
+		const written: string[] = [];
+		const silent = {
+			columns: 80,
+			rows: 24,
+			kittyProtocolActive: false,
+			start() {},
+			stop() {},
+			drainInput: async () => {},
+			write: (data: string) => written.push(data),
+			moveBy() {},
+			hideCursor() {},
+			showCursor() {},
+			clearLine() {},
+			clearFromCursor() {},
+			clearScreen() {},
+			setTitle() {},
+			setProgress() {},
+			setProgramStatus() {},
+		} as unknown as Terminal;
+		const screen = new TuiMainScreen(silent);
+		screen.start();
+		const errors: string[] = [];
+		const started = performance.now();
+		try {
+			const stop = await startTheme(screen, SettingsManager.inMemory(), (message) => errors.push(message));
+			const waited = performance.now() - started;
+			try {
+				// It asked (OSC 11, the background) and waited no longer than the timeout.
+				expect(written.join("")).toContain("\x1b]11;?");
+				expect(waited).toBeGreaterThanOrEqual(90);
+				expect(waited).toBeLessThan(1000);
+				// The block keeps the terminal's own background, and nothing is reported as an error.
+				expect(panel()).toContain(DEFAULT);
+				expect(panel()).not.toMatch(/\[48;[25];/);
+				expect(errors).toEqual([]);
+			} finally {
+				stop();
+			}
+		} finally {
+			screen.stop();
 		}
 	});
 });
