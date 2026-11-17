@@ -6,6 +6,13 @@ on:
     branches:
       - main
 
+# A push to a pull request's branch cancels the run of its push before: only the
+# newest commit's result counts there. head_ref is set for pull requests alone, so
+# each push to main is a group of its own, and runs to the end.
+concurrency:
+  group: ci-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   # The same hooks `git commit` runs, through the same devenv, so CI and a
   # local commit cannot disagree about formatting, lint, types or tests.

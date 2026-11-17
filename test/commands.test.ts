@@ -84,6 +84,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 async function type(target: CustomEditor, keys: string): Promise<void> {
 	for (const key of keys) {
 		target.handleInput(key);
+		// biome-ignore lint/performance/noAwaitInLoops: keys are typed one after another
 		await settle();
 	}
 }
@@ -115,7 +116,7 @@ describe("the commands' menu", () => {
 		expect(shown).toContain("Deep reasoning");
 		expect(shown).toContain("(current)");
 		// Opus 5.5 can't turn thinking off.
-		expect(shown).not.toMatch(/\boff\b/);
+		expect(shown).not.toMatch(/\boff\b/u);
 		target.handleInput(KEYS.down);
 		target.handleInput(KEYS.enter);
 		await settle();
@@ -202,8 +203,8 @@ describe("/tree's lines", () => {
 		const { editor: target } = editor();
 		await type(target, "/tree ");
 		const shown = menu(target);
-		expect(shown).toMatch(/#1\s+the first/);
-		expect(shown).toMatch(/└ #3\s+→ a different second · current · 2 messages · latest: and a/);
-		expect(shown).toMatch(/└ #5\s+→ a fresh start/);
+		expect(shown).toMatch(/#1\s+the first/u);
+		expect(shown).toMatch(/└ #3\s+→ a different second · current · 2 messages · latest: and a/u);
+		expect(shown).toMatch(/└ #5\s+→ a fresh start/u);
 	});
 });

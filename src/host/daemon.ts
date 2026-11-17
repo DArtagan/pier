@@ -46,6 +46,7 @@ import {
 	type Methods,
 	type ModelSummary,
 	PROTOCOL_VERSION,
+	parseRequest,
 	type Request,
 	type Response,
 } from "./protocol.ts";
@@ -124,7 +125,11 @@ const context: Context = BACKGROUND_CONTEXT;
 
 export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	const log = options.log ?? (() => {});
-	// First, so a second daemon gives up before it touches any storage.
+	const model = options.model;
+	if (options.models.getModel(model.provider, model.modelId) === undefined) {
+		throw new Error(`No model ${model.provider}/${model.modelId}`);
+	}
+	// Before any storage, so a second daemon gives up before it touches it.
 	await claimSocket(options.socketPath);
 	const registry = createRegistry();
 	registry.install(CodingTools);
@@ -139,7 +144,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			registry,
 			env: async ({ conversationId, cwd, read }, envContext) => {
 				const vars = (await read.snapshot(ClientEnvDoc, conversationId, envContext))?.vars;
-				return new NodeExecutionEnv({ cwd: cwd ?? homedir(), shellEnv: vars });
+				return new NodeExecutionEnv({ cwd: cwd ?? homedir(), ...(vars === undefined ? {} : { shellEnv: vars }) });
 			},
 			// A bash call batched with a write or edit runs after it, not beside it.
 			settings: { toolExecution: "sequential" },
@@ -284,7 +289,11 @@ class ConversationAccess {
 		const conversation = await this.harness.createConversation(
 			{
 				ownership: { kind: "ownerless" },
-				agent: { model: this.#options.model, thinkingLevel: this.#options.thinkingLevel, cwd },
+				agent: {
+					model: this.#options.model,
+					...(this.#options.thinkingLevel === undefined ? {} : { thinkingLevel: this.#options.thinkingLevel }),
+					cwd,
+				},
 				init: async (tx, id) => {
 					number = assign(await tx.doc(NumbersDoc), id);
 				},
@@ -314,9 +323,7 @@ class ConversationAccess {
 			fork.before = before;
 		};
 		// The pane's environment comes with the client's attach, as for any conversation.
-		if (previous !== undefined) {
-			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
-		} else {
+		if (previous === undefined) {
 			const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
 			await this.harness.createConversation(
 				{
@@ -330,6 +337,8 @@ class ConversationAccess {
 				},
 				context,
 			);
+		} else {
+			await conversation.fork(previous.id, { ownership: { kind: "ownerless" }, init }, context);
 		}
 		return number;
 	}
@@ -344,6 +353,7 @@ class ConversationAccess {
 		const texts: string[] = [];
 		for (const item of inbox?.items ?? []) {
 			if (item.mode === "write") continue;
+			// biome-ignore lint/performance/noAwaitInLoops: oldest first, a handful at most, on synchronous storage (see `list`)
 			const submission = await this.harness.submission(item.id, context);
 			if ((await submission?.abort(context)) !== "aborted") continue;
 			const text = textOf(item.content as string | readonly { type: string; text?: string }[]);
@@ -424,6 +434,9 @@ class ConversationAccess {
 			// Subagents' conversations belong to their task, not to a person, and have no number.
 			const number = byId.get(record.id);
 			if (record.owner !== undefined || number === undefined) continue;
+			// One at a time. The storage answers synchronously, so in parallel there's nothing to
+			// overlap: 500 conversations listed in 27 ms that way, 25 ms like this.
+			// biome-ignore lint/performance/noAwaitInLoops: measured no faster in parallel (above)
 			const agent = await this.harness.snapshot(AgentDoc, record.id, context);
 			if (filter.cwd !== undefined && agent?.cwd !== filter.cwd) continue;
 			const conversation = await this.harness.conversation(record.id, context);
@@ -453,7 +466,7 @@ class ConversationAccess {
 				...(newestText === undefined ? {} : { latest: oneLine(newestText.text), active: newestText.timestamp }),
 				...(own === undefined ? {} : { ownMessages: own.count }),
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
-				...(text === undefined ? {} : { title: text.replace(/\s+/g, " ").slice(0, 80) }),
+				...(text === undefined ? {} : { title: text.replace(/\s+/gu, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
 				activity: Number(newest?.id ?? record.id),
 			});
@@ -485,13 +498,19 @@ class Connection {
 	}
 
 	async #receive(data: RawData): Promise<void> {
-		let request: Request;
+		let message: unknown;
 		try {
-			request = JSON.parse(data.toString()) as Request;
+			message = JSON.parse(data.toString());
 		} catch {
 			this.#send({ id: -1, error: { message: "Not JSON" } });
 			return;
 		}
+		const parsed = parseRequest(message);
+		if ("error" in parsed) {
+			this.#send({ id: parsed.id, error: { message: parsed.error } });
+			return;
+		}
+		const { request } = parsed;
 		try {
 			const result = await this.#handle(request);
 			this.#send({ id: request.id, result });
@@ -596,7 +615,7 @@ class Connection {
 
 /** A message on one line, cut short, for a listing. */
 function oneLine(text: string): string {
-	return text.replace(/\s+/g, " ").trim().slice(0, 80);
+	return text.replace(/\s+/gu, " ").trim().slice(0, 80);
 }
 
 /**

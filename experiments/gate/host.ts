@@ -168,6 +168,7 @@ const settle = async (conversation: Conversation, id: SubmissionId) => {
 
 const watched = new Map<ConversationId, Awaited<ReturnType<typeof watch>>>();
 for (const step of steps) {
+	// biome-ignore lint/performance/noAwaitInLoops: the gate's steps, in order
 	const conversation = await open(step.conv);
 	if (!watched.has(conversation.id)) {
 		const provider = await harness.snapshot(ProviderDoc, conversation.id, context);
@@ -177,7 +178,7 @@ for (const step of steps) {
 	out({ t: "result", step, ...(await run(step, conversation)) });
 	writeFileSync(statePath, JSON.stringify(conversations, null, "\t"));
 }
-for (const stream of watched.values()) await stream.stop();
+await Promise.all([...watched.values()].map((stream) => stream.stop()));
 // Releases per-session provider state, such as the warm Claude Code process pi-claude-code
 // keeps for each conversation. pi does this when a session ends; Durable never does, and
 // without it that process outlives its 5-minute limit and keeps this one running.
@@ -230,6 +231,7 @@ async function run(step: Step, conversation: Conversation): Promise<Record<strin
 async function untilRunning(match: string): Promise<void> {
 	for (let waited = 0; waited < 10_000; waited += 50) {
 		if (processesIn(workspace).some((line) => line.includes(match))) return;
+		// biome-ignore lint/performance/noAwaitInLoops: polling
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 }
@@ -238,7 +240,7 @@ async function untilRunning(match: string): Promise<void> {
 function descendantsOf(root: number): string[] {
 	const parents = new Map<number, number>();
 	const commands = new Map<number, string>();
-	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/u.test(entry))) {
 		try {
 			// The parent is the 2nd field after the parenthesized command, which may hold spaces.
 			const stat = readFileSync(`/proc/${name}/stat`, "utf8");
@@ -264,7 +266,7 @@ function descendantsOf(root: number): string[] {
 /** Live processes whose working directory is under `dir`. */
 export function processesIn(dir: string): string[] {
 	const found: string[] = [];
-	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name))) {
 		try {
 			if (!readlinkSync(`/proc/${pid}/cwd`).startsWith(dir)) continue;
 			found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120)}`);

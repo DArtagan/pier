@@ -173,12 +173,12 @@ describe("tool calls", () => {
 		const collapsed = fill(tools, stored);
 		expect(collapsed).toContain("$ seq 30");
 		expect(collapsed).toContain("line 30");
-		expect(collapsed).not.toMatch(/line 3\s*$/m);
-		expect(collapsed).toMatch(/earlier lines, ctrl\+o to expand/);
+		expect(collapsed).not.toMatch(/line 3\s*$/mu);
+		expect(collapsed).toMatch(/earlier lines, ctrl\+o to expand/u);
 		expect(collapsed).toContain("Took 1.2s");
 		expect(isExpandKey("\x0f")).toBe(true);
 		tools.setExpanded(true);
-		expect(fill(tools, stored)).toMatch(/line 3\s*$/m);
+		expect(fill(tools, stored)).toMatch(/line 3\s*$/mu);
 	});
 
 	it("shows a running call's output under its call, and stops its clock when the slot goes without a result", () => {
@@ -425,7 +425,7 @@ describe("theme", () => {
 				expect(waited).toBeLessThan(1000);
 				// The block keeps the terminal's own background, and nothing is reported as an error.
 				expect(panel()).toContain(DEFAULT);
-				expect(panel()).not.toMatch(/\[48;[25];/);
+				expect(panel()).not.toMatch(/\[48;[25];/u);
 				expect(errors).toEqual([]);
 			} finally {
 				stop();

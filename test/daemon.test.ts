@@ -23,9 +23,10 @@ import {
 } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "../src/host/client.ts";
 import { type Daemon, startDaemon } from "../src/host/daemon.ts";
+import { PROTOCOL_VERSION } from "../src/host/protocol.ts";
 import { createPrompt } from "../src/layer/prompt.ts";
 
 describe("daemon", () => {
@@ -40,7 +41,7 @@ describe("daemon", () => {
 		socketPath = join(dir, "run", "pier.sock");
 	});
 	afterEach(async () => {
-		for (const client of clients.splice(0)) client.close();
+		for (const connected of clients.splice(0)) connected.close();
 		await daemon?.close();
 		daemon = undefined;
 		await rm(dir, { recursive: true, force: true });
@@ -74,6 +75,28 @@ describe("daemon", () => {
 				resolve(view);
 			});
 		});
+	}
+	/**
+	 * A daemon of its own on the socket, which answers each request's text with what
+	 * `answer` returns; until `stop`.
+	 */
+	async function fakeDaemon(answer: (request: { id: number; method: string }) => string) {
+		await mkdir(join(dir, "run"), { recursive: true });
+		const server = createServer();
+		const sockets = new WebSocketServer({ server });
+		sockets.on("connection", (socket) =>
+			socket.on("message", (data) =>
+				socket.send(answer(JSON.parse(data.toString()) as { id: number; method: string })),
+			),
+		);
+		await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
+		return {
+			async stop() {
+				for (const socket of sockets.clients) socket.terminate();
+				await new Promise<void>((resolve) => sockets.close(() => resolve()));
+				await new Promise<void>((resolve) => server.close(() => resolve()));
+			},
+		};
 	}
 	const entries = (view: TranscriptView): EntryRecord[] =>
 		view.items.flatMap((item) => (item.kind === "entry" ? [item.entry] : []));
@@ -152,7 +175,7 @@ describe("daemon", () => {
 		await until(conversation, answered("first answer"));
 		const { conversations } = await connected.request("list", { cwd: dir });
 		expect(conversations.map((summary) => summary.number).sort()).toEqual([1, 2, 3]);
-		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(/No conversation #9/);
+		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(/No conversation #9/u);
 	});
 
 	it("numbers the conversations of a store from before numbers, oldest first", async () => {
@@ -188,7 +211,7 @@ describe("daemon", () => {
 		const { client: connected, conversation } = await client();
 		await conversation.attach({ kind: "new" }, dir, {});
 		await connected.request("submit", { text: "wait" });
-		await until(conversation, (view) => !idle(view));
+		await until(conversation, (latest) => !idle(latest));
 		await connected.request("abort", {});
 		const view = await until(conversation, idle);
 		expect((view.docs["pi.live"] as LiveState).runFailure?.reason).toBe("aborted");
@@ -221,7 +244,7 @@ describe("daemon", () => {
 		await daemon?.close();
 		await first.client.closed;
 		// Rejected at once: ws drops a send on a closed socket, so it would otherwise never settle.
-		await expect(first.client.request("list", {})).rejects.toThrow(/Not connected/);
+		await expect(first.client.request("list", {})).rejects.toThrow(/Not connected/u);
 
 		// Retrying from before the new daemon is there.
 		const reconnecting = connectWhenUp(socketPath, { firstDelayMs: 10, maxDelayMs: 50 });
@@ -247,6 +270,7 @@ describe("daemon", () => {
 	/** Turns `from` up to `to`, one after another, each answered: two entries a turn. */
 	async function converse(connected: PierClient, conversation: AttachedConversation, from: number, to: number) {
 		for (let turn = from; turn < to; turn++) {
+			// biome-ignore lint/performance/noAwaitInLoops: a conversation's turns, in order
 			await connected.request("submit", { text: `turn ${turn}` });
 			await until(conversation, answered(`answer ${turn}`));
 		}
@@ -258,6 +282,7 @@ describe("daemon", () => {
 		...turns: [text: string, answer: string][]
 	) {
 		for (const [text, answer] of turns) {
+			// biome-ignore lint/performance/noAwaitInLoops: a conversation's turns, in order
 			await connected.request("submit", { text });
 			await until(conversation, answered(answer));
 		}
@@ -278,6 +303,7 @@ describe("daemon", () => {
 		expect(total).toBeGreaterThan(150);
 		while (view.items[0]?.kind === "earlier") {
 			const before = entries(view).length;
+			// biome-ignore lint/performance/noAwaitInLoops: page by page, each before the last
 			await fresh.conversation.loadEarlier(BACKGROUND_CONTEXT);
 			view = await until(fresh.conversation, () => true);
 			expect(entries(view).length).toBeGreaterThan(before);
@@ -331,28 +357,74 @@ describe("daemon", () => {
 		await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
 
 		// A daemon of another protocol version answers hello with an error.
-		await mkdir(join(dir, "run"), { recursive: true });
-		const server = createServer();
-		const sockets = new WebSocketServer({ server });
-		sockets.on("connection", (socket) =>
-			socket.on("message", (data) => {
-				const { id } = JSON.parse(data.toString()) as { id: number };
-				socket.send(JSON.stringify({ id, error: { message: "Protocol 2 isn't 3: update pier" } }));
-			}),
+		const fake = await fakeDaemon(({ id }) =>
+			JSON.stringify({ id, error: { message: "Protocol 2 isn't 3: update pier" } }),
 		);
-		await new Promise<void>((resolve) => server.listen(socketPath, () => resolve()));
 		try {
-			await expect(connectWhenUp(socketPath, { firstDelayMs: 10 })).rejects.toThrow(/update pier/);
+			await expect(connectWhenUp(socketPath, { firstDelayMs: 10 })).rejects.toThrow(/update pier/u);
 		} finally {
-			for (const socket of sockets.clients) socket.terminate();
-			await new Promise<void>((resolve) => sockets.close(() => resolve()));
-			await new Promise<void>((resolve) => server.close(() => resolve()));
+			await fake.stop();
 		}
+	});
+
+	it("answers a request that isn't one with an error, and goes on serving the connection", async () => {
+		await start([]);
+		const socket = new WebSocket(`ws+unix://${socketPath}:/`);
+		await new Promise((resolve) => socket.once("open", resolve));
+		const ask = (text: string) =>
+			new Promise<unknown>((resolve) => {
+				socket.once("message", (data) => resolve(JSON.parse(data.toString())));
+				socket.send(text);
+			});
+		try {
+			expect(await ask("{")).toEqual({ id: -1, error: { message: "Not JSON" } });
+			expect(await ask(JSON.stringify({ id: 1, method: "launch", params: {} }))).toEqual({
+				id: 1,
+				error: { message: expect.stringMatching(/^Not a request: \/method /u) },
+			});
+			const attach = { target: { kind: "number", number: 0 }, cwd: dir, env: {} };
+			expect(await ask(JSON.stringify({ id: 2, method: "attach", params: attach }))).toEqual({
+				id: 2,
+				error: { message: expect.stringMatching(/^Bad params for attach: \/target\/number /u) },
+			});
+			expect(await ask(JSON.stringify({ id: 3, method: "hello", params: { version: PROTOCOL_VERSION } }))).toEqual({
+				id: 3,
+				result: { version: PROTOCOL_VERSION, pid: process.pid },
+			});
+		} finally {
+			socket.close();
+		}
+	});
+
+	it("closes a connection whose daemon sends what isn't pier's, failing what's pending", async () => {
+		const fake = await fakeDaemon(({ id, method }) =>
+			method === "hello" ? JSON.stringify({ id, result: { version: PROTOCOL_VERSION, pid: 1 } }) : "<html>",
+		);
+		try {
+			const connected = await PierClient.connect(socketPath);
+			await expect(connected.request("list", {})).rejects.toThrow(/isn't one of pier's/u);
+			await connected.closed;
+			expect(connected.connected).toBe(false);
+		} finally {
+			await fake.stop();
+		}
+	});
+
+	it("refuses to start with a model it can't run", async () => {
+		await expect(
+			startDaemon({
+				socketPath,
+				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
+				models: createModels(),
+				model: { provider: "faux", modelId: "faux-1" },
+			}),
+		).rejects.toThrow("No model faux/faux-1");
 	});
 
 	it("refuses a second daemon on the same socket", async () => {
 		await start([]);
 		const models = createModels();
+		models.setProvider(faux.provider);
 		await expect(
 			startDaemon({
 				socketPath,
@@ -360,7 +432,7 @@ describe("daemon", () => {
 				models,
 				model: { provider: "faux", modelId: "faux-1" },
 			}),
-		).rejects.toThrow(/already listening/);
+		).rejects.toThrow(/already listening/u);
 	});
 
 	it("tells a client a model's context window, for its footer", async () => {
@@ -398,7 +470,7 @@ describe("daemon", () => {
 		);
 		expect((view.docs["pi.agent"] as { model?: unknown }).model).toEqual({ provider: "faux", modelId: "faux-1" });
 		await expect(connected.request("configure", { model: { provider: "faux", modelId: "nowhere" } })).rejects.toThrow(
-			/No model/,
+			/No model/u,
 		);
 	});
 
@@ -447,7 +519,7 @@ describe("daemon", () => {
 		expect(parent?.number).toBe(conversation.number);
 		await conversation.attach({ kind: "number", number }, dir, {});
 		expect((await connected.request("entries", { limit: 50 })).entries).toEqual([]);
-		await expect(connected.request("fork", { before: 1 as never })).rejects.toThrow(/your messages/);
+		await expect(connected.request("fork", { before: 1 as never })).rejects.toThrow(/your messages/u);
 	});
 
 	it("takes queued messages back, as pi's Alt+Up does", async () => {
@@ -462,7 +534,7 @@ describe("daemon", () => {
 		const { client: connected, conversation } = await client();
 		await conversation.attach({ kind: "new" }, dir, {});
 		await connected.request("submit", { text: "start" });
-		await until(conversation, (view) => !idle(view));
+		await until(conversation, (latest) => !idle(latest));
 		await connected.request("submit", { text: "queued one", whenBusy: "followUp" });
 		await connected.request("submit", { text: "queued two", whenBusy: "followUp" });
 		expect(await connected.request("dequeue", {})).toEqual({ texts: ["queued one", "queued two"] });
@@ -475,6 +547,6 @@ describe("daemon", () => {
 	it("rejects requests before attaching", async () => {
 		await start([]);
 		const { client: connected } = await client();
-		await expect(connected.request("submit", { text: "hi" })).rejects.toThrow(/Not attached/);
+		await expect(connected.request("submit", { text: "hi" })).rejects.toThrow(/Not attached/u);
 	});
 });

@@ -293,6 +293,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			notify(yellow(`${why}; reconnecting… Ctrl+C leaves`));
 			render();
 			for (;;) {
+				// biome-ignore lint/performance/noAwaitInLoops: a retry, each try after the last
 				const next = client.connected ? client : await connectWhenUp(options.socketPath, { signal: left.signal });
 				try {
 					await conversation.reattach(next, options.cwd, options.env);
@@ -373,7 +374,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	);
 
 	const command = async (line: string) => {
-		const [name, ...rest] = line.slice(1).split(/\s+/);
+		const [name, ...rest] = line.slice(1).split(/\s+/u);
 		const argument = rest.join(" ").trim();
 		switch (name) {
 			case "help":
@@ -385,7 +386,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			case "resume":
 			case "tree": {
 				if (argument === "") return pick(name);
-				const number = /^#?(\d+)$/.exec(argument)?.[1];
+				const number = /^#?(\d+)$/u.exec(argument)?.[1];
 				if (number === undefined) {
 					notify(red(`/${name} takes a conversation's number`));
 					return;
@@ -519,13 +520,14 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			return { consume: true };
 		}
 		if (matchesKey(data, "ctrl+c") || matchesKey(data, "ctrl+d")) {
-			if (editor.getText() !== "") {
+			if (editor.getText() === "") leaving?.(0);
+			else {
 				editor.setText("");
 				tui.requestRender();
-			} else leaving?.(0);
+			}
 			return { consume: true };
 		}
-		return undefined;
+		return;
 	});
 
 	const done = new Promise<number>((resolve) => {
@@ -570,7 +572,7 @@ export function fillHistory(editor: CustomEditor, messages: readonly { text: str
 
 function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 	const bottom = getKeybindings().getKeys("tui.altScreen.bottom")[0];
-	const shortcut = bottom === undefined ? "" : ` · ${bottom.replace(/(^|\+)([a-z])/g, (all) => all.toUpperCase())}`;
+	const shortcut = bottom === undefined ? "" : ` · ${bottom.replace(/(^|\+)([a-z])/gu, (all) => all.toUpperCase())}`;
 	return new TuiAltScreen(terminal, hardwareCursor, undefined, {
 		scrollToEndIndicator: () => `\x1b[7m ↓ Jump to latest message${shortcut} \x1b[27m`,
 		wheelScrollLines: "auto",
@@ -884,7 +886,7 @@ function withSpace(component: Component): Component {
 export function compactionSummary(message: Message | undefined): string {
 	if (message === undefined || message.role !== "user") return "";
 	const text = typeof message.content === "string" ? message.content : textParts(message.content);
-	const match = /<summary>\n?([\s\S]*?)\n?<\/summary>\s*$/.exec(text);
+	const match = /<summary>\n?([\s\S]*?)\n?<\/summary>\s*$/u.exec(text);
 	return (match?.[1] ?? text).trim();
 }
 
@@ -892,8 +894,8 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 	const { tools } = style;
 	const components: Component[] = [];
 	const partial = live.generation?.message as AssistantMessage | undefined;
-	if (partial !== undefined) components.push(renderResponse(partial, style, false));
-	else style.streamEnded();
+	if (partial === undefined) style.streamEnded();
+	else components.push(renderResponse(partial, style, false));
 	if (live.generation?.retry !== undefined) {
 		components.push(new Text(yellow(`retrying: ${live.generation.retry.error}`), 1, 0));
 	}

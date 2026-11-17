@@ -53,6 +53,7 @@ let stop = late ? undefined : await attach();
 await root.submit({ type: "input", content: "Run the loop" }, context);
 if (late) {
 	// Wait until the tool is running, then join.
+	// biome-ignore lint/performance/noAwaitInLoops: polling
 	while ((await harness.snapshot(LiveDoc, root.id, context))?.tools?.[0]?.status !== "running") {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 	}

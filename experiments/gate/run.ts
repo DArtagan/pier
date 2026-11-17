@@ -30,12 +30,12 @@ writeFileSync(
 
 const checks: { group: string; check: string; ok: boolean; detail?: string }[] = [];
 const check = (group: string, name: string, ok: boolean, detail?: string) => {
-	checks.push({ group, check: name, ok, detail });
+	checks.push({ group, check: name, ok, ...(detail === undefined ? {} : { detail }) });
 	console.log(
 		`${ok ? "PASS" : "FAIL"}  ${group}: ${name}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
 	);
 };
-const note = (text: string) => console.log(`      ${text}`);
+const note = (message: string) => console.log(`      ${message}`);
 const transcript: string[] = [];
 /** Groups whose host didn't exit by itself within its time limit, and was killed. */
 const hung: string[] = [];
@@ -104,11 +104,11 @@ function host(
 						process.kill(-pid, "SIGKILL");
 						// What a process-group kill alone leaves running, then what the cgroup
 						// kill takes too.
-						const alive = (line: string) => existsSync(`/proc/${line.split(" ")[0]}`);
+						const alive = (entry: string) => existsSync(`/proc/${entry.split(" ")[0]}`);
 						survivors.push(...new Set([...tree.filter(alive), ...processesIn(workspace)]));
-						for (const line of survivors) {
+						for (const survivor of survivors) {
 							try {
-								process.kill(Number(line.split(" ")[0]), "SIGKILL");
+								process.kill(Number(survivor.split(" ")[0]), "SIGKILL");
 							} catch {
 								// Already gone.
 							}
@@ -125,17 +125,27 @@ function host(
 	});
 }
 
-type Usage = { input: number; cacheRead: number; cacheWrite: number; cacheWrite1h?: number };
-type Answer = { stopReason: string; text: string; errorMessage?: string; usage?: Usage };
+interface Usage {
+	input: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cacheWrite1h?: number;
+}
+interface Answer {
+	stopReason: string;
+	text: string;
+	errorMessage?: string;
+	usage?: Usage;
+}
 const answer = (result: Line | undefined) => result?.answer as Answer | undefined;
 const text = (result: Line | undefined) => answer(result)?.text ?? "";
 const done = (result: Line | undefined) => result?.status === "done";
 const marked = (result: Line | undefined) => text(result).trimEnd().endsWith(MARKER);
-const turn = (conv: string, requestId: string, text: string): Extract<Step, { op: "turn" }> => ({
+const turn = (conv: string, requestId: string, prompt: string): Extract<Step, { op: "turn" }> => ({
 	op: "turn",
 	conv,
 	requestId,
-	text,
+	text: prompt,
 });
 const noTools = (question: string) => `Without using any tools: ${question}`;
 /** The share of an answer's input tokens read from the prompt cache. */
@@ -348,7 +358,7 @@ if (IDLE_MINUTES > 0) {
 {
 	const group = "all";
 	// pi-claude-code fails a turn billed to Extra Usage with a "Claude Code billing" error.
-	check(group, "nothing billed to Extra Usage", !/extra usage|Claude Code billing/i.test(transcript.join("\n")));
+	check(group, "nothing billed to Extra Usage", !/extra usage|Claude Code billing/iu.test(transcript.join("\n")));
 	const errors = transcript.filter((line) => line.includes('"errorMessage"'));
 	check(group, "no assistant errors", errors.length === 0, errors.join("\n"));
 	const reports = transcript.filter((line) => line.includes('"t":"report"'));
@@ -368,7 +378,7 @@ process.exitCode = failed.length === 0 ? 0 : 1;
 function descendantsOf(root: number): string[] {
 	const parents = new Map<number, number>();
 	const commands = new Map<number, string>();
-	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/.test(entry))) {
+	for (const name of readdirSync("/proc").filter((entry) => /^\d+$/u.test(entry))) {
 		try {
 			// The parent is the 2nd field after the parenthesized command, which may hold spaces.
 			const stat = readFileSync(`/proc/${name}/stat`, "utf8");
@@ -393,7 +403,7 @@ function descendantsOf(root: number): string[] {
 /** Live processes whose working directory is under `dir`: what a crash leaves running. */
 function processesIn(dir: string): string[] {
 	const found: string[] = [];
-	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/.test(name))) {
+	for (const pid of readdirSync("/proc").filter((name) => /^\d+$/u.test(name))) {
 		try {
 			if (!readlinkSync(`/proc/${pid}/cwd`).startsWith(dir)) continue;
 			found.push(`${pid} ${readFileSync(`/proc/${pid}/cmdline`, "utf8").replaceAll("\0", " ").slice(0, 120)}`);

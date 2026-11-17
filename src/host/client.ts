@@ -27,6 +27,8 @@ export class PierClient {
 	readonly #pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	readonly #listeners = new Set<(event: Event) => void>();
 	#next = 1;
+	/** Why this end closed the connection, if it did on its own. */
+	#failure: string | undefined;
 	/** Settles when the connection closes, from either side. */
 	readonly closed: Promise<void>;
 
@@ -36,7 +38,14 @@ export class PierClient {
 		// what callers watch; without a listener, ws would throw it out of the process.
 		socket.on("error", () => {});
 		socket.on("message", (data) => {
-			const message = JSON.parse(data.toString()) as ServerMessage;
+			const message = parseServerMessage(data.toString());
+			if (message === undefined) {
+				// The daemon said hello with this protocol's version, so this is a bug, not a
+				// mismatch; thrown here, it would take the whole process down.
+				this.#failure = "The daemon sent a message that isn't one of pier's";
+				socket.close(1002, "protocol error");
+				return;
+			}
 			if ("event" in message) {
 				for (const listener of this.#listeners) listener(message);
 				return;
@@ -49,7 +58,8 @@ export class PierClient {
 		});
 		this.closed = new Promise((resolve) => {
 			socket.once("close", () => {
-				for (const pending of this.#pending.values()) pending.reject(new Error("The daemon closed the connection"));
+				const reason = this.#failure ?? "The daemon closed the connection";
+				for (const pending of this.#pending.values()) pending.reject(new Error(reason));
 				this.#pending.clear();
 				resolve();
 			});
@@ -99,6 +109,23 @@ export class PierClient {
 }
 
 /**
+ * `text` as a message from the daemon: JSON, with an `event` or a numeric `id`. Its
+ * contents are Durable's own and aren't checked further: the daemon speaks this protocol's
+ * version, which `hello` checked.
+ */
+function parseServerMessage(text: string): ServerMessage | undefined {
+	let message: unknown;
+	try {
+		message = JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+	if (typeof message !== "object" || message === null) return undefined;
+	if ("event" in message) return typeof message.event === "string" ? (message as ServerMessage) : undefined;
+	return "id" in message && typeof message.id === "number" ? (message as ServerMessage) : undefined;
+}
+
+/**
  * Connect to the daemon on `socketPath`, retrying while nothing answers there, as while
  * it restarts, until `signal` aborts. A daemon that answers and refuses (a protocol of
  * another version) isn't retried: that rejects with its `DaemonError`.
@@ -112,6 +139,7 @@ export async function connectWhenUp(
 	for (;;) {
 		options.signal?.throwIfAborted();
 		try {
+			// biome-ignore lint/performance/noAwaitInLoops: a retry, each try after the last
 			return await PierClient.connect(socketPath);
 		} catch (error) {
 			if (error instanceof DaemonError) throw error;
@@ -209,6 +237,7 @@ export class AttachedConversation {
 			const gap = this.#current?.items.find((item) => item.kind === "gap");
 			if (gap === undefined || gap.kind !== "gap") return;
 			const transcript = this.#transcript;
+			// biome-ignore lint/performance/noAwaitInLoops: the next gap is found in the view this fill brings
 			const view = await transcript.fillGap(gap, context);
 			// Another conversation's view arrived meanwhile: its transcript is a new one.
 			if (transcript !== this.#transcript) return;

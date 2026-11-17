@@ -88,6 +88,7 @@ describe("conversation directories", () => {
 		const harness = await Harness.open(new MemoryStorage(), { models, registry }, context);
 		try {
 			for (const cwd of dirs) {
+				// biome-ignore lint/performance/noAwaitInLoops: the directories are expected in this order
 				const conversation = await harness.createConversation(
 					{ ownership: { kind: "ownerless" }, agent: { model: { provider: "faux", modelId: "faux-1" }, cwd } },
 					context,
@@ -96,7 +97,7 @@ describe("conversation directories", () => {
 			}
 		} finally {
 			await harness.close(context);
-			for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+			await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
 		}
 		expect(seen).toEqual(dirs);
 		expect(dirs).not.toContain(process.cwd());
