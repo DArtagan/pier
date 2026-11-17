@@ -162,7 +162,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	/**
 	 * A line in the transcript, after its newest message, which scrolls away with it. A
 	 * `status` (dim, passing news) replaces the status just before it, if nothing came
-	 * between, as pi's `showStatus` does: Alt+Up twice shows one line, not two.
+	 * between, as pi's `showStatus` does: `/compact` twice shows one line, not two.
 	 */
 	const notify = (line: string, kind: "status" | "other" = "other") => {
 		const entries = view?.items.flatMap((item) => (item.kind === "entry" ? [item.entry.id] : [])) ?? [];
@@ -466,13 +466,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	 * Alt+Up does: to edit them and send them again.
 	 */
 	const dequeue = async () => {
+		// Silent, either way: the editor filling up, or not, says what happened.
 		const { texts } = await client.request("dequeue", {});
-		if (texts.length === 0) {
-			status("no queued messages to restore");
-			return;
-		}
+		if (texts.length === 0) return;
 		editor.setText([...texts, editor.getText()].filter((text) => text.trim() !== "").join("\n\n"));
-		status(`restored ${texts.length} queued message${texts.length === 1 ? "" : "s"} to the editor`);
 	};
 
 	/** Open `/name`'s menu, for its argument to be picked. */
@@ -713,7 +710,7 @@ export class TranscriptStyle {
 }
 
 /**
- * A line of the client's own in the transcript ("restored 2 queued messages", an error),
+ * A line of the client's own in the transcript ("compacting in the background", an error),
  * after the entry that was newest when it appeared, so it scrolls away with the rest.
  */
 export interface Notice {

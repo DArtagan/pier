@@ -28,7 +28,7 @@ stops the run; Ctrl+C on an empty editor leaves, and the run carries on. Up in a
 editor recalls the conversation's earlier messages, from every session, as in pi. When
 the daemon restarts, the client reconnects and carries on where it left off. Queued
 messages stay above the editor until the run takes them in; the client's own lines
-("new conversation #3", "restored 2 queued messages to the editor", errors) go into
+("new conversation #3", "compacting in the background", errors) go into
 the transcript, and scroll away with it.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
