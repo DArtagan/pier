@@ -238,12 +238,11 @@ In the order Will chose (below).
   follows light and dark switches. Offline, with a terminal that answers, a finished
   call gets pi's 24-bit success shade; the test fails without the query.
 
-  **Not seen working by hand yet.** In a tmux 3.8 pane here (Alacritty attached, as
-  `alacritty` with `RGB`), the query got only the device attributes reply: tmux
-  answered none of OSC 10, 11 or 4, so no backgrounds showed, and classic pi in that pane
-  would get none either. Unchecked: whether Will's classic pi shows them inside tmux (if
-  it does, tmux answers in his own sessions in a way it didn't in this detached one),
-  and how Alacritty outside tmux answers.
+  **Working, by hand:** Will, 2026-11-16, in his own tmux pane: *"The colors absolutely
+  work now."* In a detached tmux 3.8 pane Claude drove the same day, the query got only
+  the device attributes reply, as tmux answered none of OSC 10, 11 or 4, so no
+  backgrounds showed there. So a pane no client shows may get no colors, and fall back
+  to pi's blank panels; why wasn't checked.
 - **Images** in tool results and pasted ones. pi-tui renders Kitty and iTerm2 images.
   Unchecked: Alacritty, Will's terminal, has neither protocol, so images may only ever
   be placeholders there.
