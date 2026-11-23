@@ -6,7 +6,11 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context as RequestContext, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import {
+	type Context as RequestContext,
+	registerSessionResourceCleanup,
+	type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
 	type FauxResponseStep,
@@ -47,7 +51,7 @@ describe("daemon", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	async function start(responses: FauxResponseStep[]): Promise<void> {
+	async function start(responses: FauxResponseStep[], releaseAfterMs?: number): Promise<void> {
 		faux.setResponses(responses);
 		const models = createModels();
 		models.setProvider(faux.provider);
@@ -57,6 +61,7 @@ describe("daemon", () => {
 			models,
 			model: { provider: "faux", modelId: "faux-1" },
 			extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+			...(releaseAfterMs === undefined ? {} : { releaseAfterMs }),
 		});
 	}
 
@@ -568,6 +573,49 @@ describe("daemon", () => {
 		release?.();
 		const view = await until(conversation, (latest) => idle(latest) && answered("slow answer")(latest));
 		expect(answered("queued one")(view)).toBe(false);
+	});
+
+	// pi-claude-code keeps a warm Claude Code per conversation until pi-ai's
+	// `cleanupSessionResources()` names its provider session (README, "Claude, through
+	// Claude Code"). The daemon releases it once the conversation idles; Durable (1.6.0 on)
+	// releases every conversation's when the Harness closes.
+	describe("provider resources", () => {
+		const released: (string | undefined)[] = [];
+		let unregister: (() => void) | undefined;
+		beforeEach(() => {
+			released.length = 0;
+			unregister = registerSessionResourceCleanup((sessionId) => released.push(sessionId));
+		});
+		afterEach(() => unregister?.());
+
+		/** The provider session id of the conversation in `view`. */
+		const sessionOf = (view: TranscriptView) =>
+			(view.docs["pi.provider"] as { sessionId?: string } | undefined)?.sessionId;
+
+		async function answeredOnce(): Promise<string> {
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			await connected.request("submit", { text: "hi" });
+			const view = await until(conversation, (latest) => idle(latest) && answered("answer")(latest));
+			const sessionId = sessionOf(view);
+			if (sessionId === undefined) throw new Error("no provider session id");
+			return sessionId;
+		}
+
+		it("releases a conversation's once it has been idle a while", async () => {
+			await start([fauxAssistantMessage("answer")], 50);
+			const sessionId = await answeredOnce();
+			await expect.poll(() => released, { timeout: 2000 }).toContain(sessionId);
+		});
+
+		it("releases every conversation's when the daemon closes", async () => {
+			await start([fauxAssistantMessage("answer")]);
+			const sessionId = await answeredOnce();
+			expect(released).toEqual([]);
+			await daemon?.close();
+			daemon = undefined;
+			expect(released).toContain(sessionId);
+		});
 	});
 
 	it("rejects requests before attaching", async () => {

@@ -1,7 +1,7 @@
 // pi's "Working" line while a run goes: a spinner and "Working", drawn into the editor's
 // top border by pi's own `CustomEditor` (`embedWorkingStatus`), in the border's color, as
 // pi draws it, without pi's "(escape to interrupt)" (Will, 2026-11-16). pi's
-// `WorkingStatusIndicator` isn't exported in 1.5.2, so this is the same on pi-tui's
+// `WorkingStatusIndicator` isn't exported (1.6.0), so this is the same on pi-tui's
 // `Loader`, which it extends, with its two border methods; the editor calls only those.
 import type { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { Loader, type TUI, truncateToWidth } from "@earendil-works/pi-tui";

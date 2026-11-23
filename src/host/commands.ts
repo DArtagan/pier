@@ -33,7 +33,7 @@ const COMMANDS: readonly SlashCommand[] = [
 	{ name: "help", description: "Keys and commands" },
 ];
 
-/** pi's descriptions of its thinking levels (`ThinkingSelectorComponent`; not exported in 1.5.2). */
+/** pi's descriptions of its thinking levels (`ThinkingSelectorComponent`; not exported, 1.6.0). */
 const LEVELS: Record<ModelThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
@@ -58,7 +58,7 @@ export interface CommandSource {
 	cwd: string;
 }
 
-/** pi's text to match a model against (`getModelSearchText`; not exported in 1.5.2). */
+/** pi's text to match a model against (`getModelSearchText`; not exported, 1.6.0). */
 function modelSearchText(model: ModelSummary): string {
 	const name = model.name === undefined ? "" : ` ${model.name}`;
 	return `${model.id} ${model.provider} ${model.provider}/${model.id} ${model.provider} ${model.id}${name}`;
