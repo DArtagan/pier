@@ -5,7 +5,7 @@ Guidance for coding agents working in this repository.
 ## Overview
 
 pier runs pi on Pi Durable (`@earendil-works/pi-durable`): one daemon per host owns
-every session, and clients attach to it. TypeScript on Node 24, run directly with
+every session, and clients attach to it. TypeScript on Node 26, run directly with
 Node's type stripping in development; `npm run build` compiles it for packaging. Claude is reached through Claude Code, with
 Earendil's pi-claude-code provider. See `README.md` for the layout.
 
@@ -51,11 +51,10 @@ shows exactly what changed, and fails loudly when its text doesn't match.
 ## Working with Pi Durable
 
 - **Experimental, and pinned.** Every `@earendil-works/*` package is pinned exactly,
-  all to one release (1.5.2). It needn't match the pi nixpkgs ships: pier gets its
+  all to one release (1.6.0). It needn't match the pi nixpkgs ships: pier gets its
   packages from its own lockfile (see README, "Versions"). Breaking changes land in
-  minor releases (1.5.0 had about two dozen). Bump them together: read the
-  `CHANGELOG.md` of durable, chord, ai and coding-agent first, then run the tests and
-  the gate.
+  minor releases (1.5.0 had about two dozen). Bump them together, by
+  `docs/updating.md`: changelogs, pier's workarounds, p3, then the tests and the gate.
 - **Read the source from a clone, not npm.** The npm packages ship `dist/` only.
   `git clone --depth 1 --branch v<version> https://github.com/earendil-works/pi` into
   a directory of its own has every package's `src/`, Durable's `docs/spec.md` and
@@ -86,9 +85,10 @@ shows exactly what changed, and fails loudly when its text doesn't match.
 - It runs `claude` from the PATH, or `PI_CLAUDE_CODE_COMMAND`, on Claude Code's own login
   (`claude auth login`). `PI_CLAUDE_CODE_ALLOW_USAGE_CREDITS` lets turns be billed to
   Extra Usage; without it they fail with a "Claude Code billing" error.
-- Call pi-ai's `cleanupSessionResources(sessionId)` when a conversation goes idle or the
-  host closes: Durable never does, and a conversation's warm Claude Code process
-  otherwise lingers (it kept a gate host alive for 40 minutes).
+- Call pi-ai's `cleanupSessionResources(sessionId)` when a conversation goes idle:
+  Durable does it only for every session at `harness.close()` (1.6.0), and a
+  conversation's warm Claude Code process otherwise lingers (one kept a gate host alive
+  for 40 minutes).
 - It starts Claude Code in `process.cwd()`, and Claude Code reports that to the model as
   its working directory. pier wraps the provider so that, inside a request,
   `process.cwd()` is the conversation's directory, which `ConversationDirectories`

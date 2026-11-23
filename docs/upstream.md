@@ -8,14 +8,18 @@ Update it when a bump or a look at p3 changes something, and date what changed.
 ## Pi Durable, as pier uses it
 
 Read from Durable 1.5.2's source and changelogs (a clone at `v1.5.2`), 2026-11-12,
-unless marked.
+unless marked. Re-read against 1.6.0 (a clone at `v1.6.0`) on 2026-11-23: what changed
+is marked 1.6.0, and the rest still holds.
 
 - **A library, not an app.** A harness: storage, tasks, conversations, extensions,
   compaction. The coding agent (`pi`) doesn't use it, and pi 1.2.0 removed the
   unreleased first-party server and client. Marked experimental: "The API changes
   without notice between releases." 1.4.0 changed SQLite's schema; 1.5.0 had about two
   dozen breaking changes; `pi.live` is at version 3, so a 1.4 Harness can't read what
-  1.5 wrote.
+  1.5 wrote. 1.6.0 moves `pi.tool` to version 4 and `pi.generation` to version 3, so a
+  store a 1.6 daemon has written isn't meant to go back to 1.5: roll back pier's code,
+  not its store. pier's live store opened under 1.6.0 with its 17 conversations
+  (a copy, 2026-11-23).
 - **Watching is state, not events.** `Conversation.watch(context, window?)` gives
   `{ kind: "value", value, ops }`; `watchEvents()` and `viewState()` are gone. The
   view's `entries` are a window (the newest 50, at most 100), and
@@ -48,6 +52,13 @@ unless marked.
   that Durable sends to pi-ai as `sessionId`. It survives reopening, retries,
   compaction and model changes; a fork or child gets a fresh one. pier keys Claude
   Code's directory, and its cleanup, by it.
+- **Provider resources** (1.6.0, #11961): `harness.close()` joins its tasks, then calls
+  `cleanupSessionResources(id)` for every provider session id its tasks used, and only
+  those, so another Harness in the process keeps its own. Nothing releases one when a
+  conversation idles; pier's daemon does, after five minutes. pi-ai 1.6.0 also exports
+  the registry as `@earendil-works/pi-ai/session-resources`. pi-claude-code, loaded
+  through jiti, registers its cleanup on the same pi-ai module instance Durable calls
+  (checked 2026-11-23).
 - **Compaction** sends `cacheRetention: "none"` with the conversation's `sessionId`,
   runs in the background while the conversation goes on, and places its summary at the
   next turn boundary.
@@ -60,13 +71,23 @@ unless marked.
   `process.env`. Example `29-sandbox-per-conversation.ts` gives each conversation a
   sandbox of its own. `settings.toolExecution` is `"sequential"` or `"parallel"`.
   Durable's bash has no default timeout.
-- **Not yet in a release** (on `main` at `742d49fcd`, 2026-11-16), for the next bump:
-  - **A store written after the bump can't be opened by pier's current Durable
-    again**: `pi.tool` moves to version 4 and `pi.generation` to version 3.
-  - A tool can park until an outside signal (suspendable work), which `docs/vision.md`
-    counts on for long-running work.
-  - `RunEndTask` is renamed `HookTask`. pier uses neither.
-  - pi-claude-code was unchanged since the commit pier pins (`d5b5e04`, 2026-11-05).
+- **Suspendable work** (1.6.0), which `docs/vision.md` counts on for long-running work:
+  - Signals: `defineSignal()` defines a typed value that `harness.signal(taskId, …)`
+    delivers to a task from outside; a sleep can wait for signals, a time, or both.
+  - A tool's `execute()` can return a park (`{ sleep }` or `{ wait }`) instead of a
+    result, and runs again once woken. A parked call holds no invocation, and its slot
+    shows `sleeping` or `waiting`. Examples 38–46 cover a webhook, polling, a
+    subagent, an approval gate.
+  - `beforeTool` hooks can park a call (gates); `afterTools` and `onYield` hooks can
+    start tasks. `RunEndTask` is renamed `HookTask`; pier uses neither.
+  - `SubmissionDraft.notify` signals a task when a submission settles, and
+    `onAbort: "keep"` keeps a queued input through an abort.
+  - pier's client doesn't draw a parked slot yet: pier has no tool that parks.
+- **`durationMs` of a tool result** (1.6.0) runs from the tool task's first run to its
+  result, hooks, parks, crash downtime and reruns included. pier passes it on to pi's
+  tool component (`tool-calls.ts`).
+- **`@earendil-works/pi-durable/images/fit`** (1.6.0) fits images to a model's limits
+  before they're stored, as pi does. pier doesn't take images in yet.
 
 ## pi's own pieces
 
@@ -76,9 +97,19 @@ unless marked.
   (`packages/coding-agent/src/index.ts`), and `ModelRuntime`, `SettingsManager`,
   `KeybindingsManager`, `loadProjectContextFiles`, `loadSkillsFromDir` and
   `formatSkillsForPrompt`; pier's skills section uses the last two. pier's client uses
-  the components and pi's tool definitions' renderers. Not exported in 1.5.2: the theme
-  instance and theme controller (pier imports them from `dist/` by path), the working
-  indicator, the app keymap and `createAllToolRenderers` (pier rebuilds what it needs).
+  the components and pi's tool definitions' renderers. Not exported in 1.5.2, nor in
+  1.6.0 (whose public entry didn't change): the theme instance and theme controller
+  (pier imports them from `dist/` by path), the working indicator, the app keymap,
+  `createAllToolRenderers`, `formatTokens`, `getModelSearchText`,
+  `createInteractiveTui` and `createChatViewport` (pier rebuilds what it needs). Their
+  sources are unchanged in 1.6.0 too.
+- **pi-tui 1.6.0**: `render()` returns `readonly string[]`, and a `Container` returns
+  the same cached array while its children are unchanged, so output must be copied
+  before it's changed. Enter on a menu now submits only from the command-name menu,
+  not from one whose text merely starts with `/` (a path). pier's `asPicker` sends an
+  argument's command itself either way; its tests pass unchanged.
+- **pi-claude-code** is unchanged since the commit pier pins (`d5b5e04`, 2026-11-05),
+  checked 2026-11-23.
 - **Isolation, for later:** `@earendil-works/pi-env` runs tools on another machine
   through a small Rust daemon over SSH, while the harness and credentials stay local;
   Gondolin runs QEMU or krun micro-VMs. For that work to take up: pier trusts every
@@ -132,6 +163,22 @@ unless marked.
   In p2 and p3 it's also the relay for remote access, the planned home of backups, one
   of the sign-ins, and a one-click cloud machine. pier's equivalents are the tailnet
   and backing up a SQLite file.
+- **p3, re-read 2026-11-23** (`apps/p3/` on `main` at `ff0e0ff17`; 33 commits since
+  `6359527`):
+  - **Node 26 or newer everywhere** (2026-11-18: "node 26+ all the way"), from a
+    checkout and in tests; p3 ships with a Node of its own, likely as a single
+    executable. A Node 24 executable failed its worker memory budget. pier moved to
+    Node 26 with pi 1.6.0.
+  - Work is planned in Linear now, one issue per package with one owner; the docs
+    folder holds guides (process, building on Chord, testing, performance) and the
+    old slice briefs as reference. Chord, Durable and p3's base belong to Mario.
+  - The skeleton base (2026-11-20): only what must exist before plugins load; the
+    rest are plugins (`control`, `runner`, `sessions`, `sign-in`).
+  - No lazy loading in plugins for now; packaging is its own work, later.
+  - Slice 27, the terminal client scaffold: a brief, nothing built. Slices 7, 8 and 9
+    (models, environments, the prompt): briefs; 8 gained a decision on remote
+    environments' worker memory (one SSH connection per worker, reused). No release
+    on npm (`@earendil-works/p3` isn't published). Nothing changes pier's course.
 - **Next look:** early December, against the 1 December date (`docs/vision.md`).
 
 ## Prior art

@@ -7,7 +7,7 @@ Like a pier: it stays put, and boats tie up and cast off.
 **Status:** a deliberately thin slice, in daily use: a daemon, a Unix socket, and a
 terminal client drawn with pi's own components. Claude runs on a Durable Harness
 through Claude Code, with your Claude subscription, and survives a crash mid-tool, Esc,
-compaction and forks (pi 1.5.2). See [`todos/`](todos/) for what's next.
+compaction and forks (pi 1.6.0). See [`todos/`](todos/) for what's next.
 
 ## Use
 
@@ -112,6 +112,8 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
 - `docs/vision.md` says what pier is for, and how it changes as p3 does.
 - `docs/principles.md` holds the principles all work on pier keeps to.
 - `docs/releasing.md` says how release-please makes versions.
+- `docs/updating.md` says how to move pier to a new pi release, and its dependencies
+  with it.
 - `docs/history.md` records Will's decisions, the gate's findings and the wrong turns.
 - `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
   going, as last read.
@@ -143,7 +145,9 @@ Things a host must know, all found by the gate:
 - **Release each conversation's warm Claude Code process.** pi-claude-code keeps one
   per conversation for straight continuations, and frees it when pi-ai's
   `cleanupSessionResources(sessionId)` is called with the conversation's provider
-  session id. pi does that when a session ends; Durable never does.
+  session id. pi does that when a session ends. Durable does it only when the Harness
+  closes (1.6.0), so pier's daemon also does it once a conversation has idled for five
+  minutes.
 - **Claude Code would run in the host's directory**, which it reports to the model as
   its working directory: pi-claude-code starts it in `process.cwd()`, and nothing in a
   request names a directory. pier's `ConversationDirectories` extension records each
@@ -203,9 +207,11 @@ conversation can reach is the place to revisit this.
 
 ## Versions
 
-pi's packages are pinned exactly in `package.json`, all to one release (1.5.2). Pi
+pi's packages are pinned exactly in `package.json`, all to one release (1.6.0). Pi
 Durable is experimental, and breaking changes land in minor releases, so bump them
-together and deliberately: read their changelogs, then run the tests and the gate.
+together and deliberately, as `docs/updating.md` says.
+
+pier runs on Node 26, as p3 does (its decisions, 2026-11-18: "node 26+ all the way").
 
 pier doesn't follow the pi that nixpkgs ships (1.5.0 on 2026-11-12). Its packages come
 from its own lockfile, so nothing ties the two together. What pier shares with classic

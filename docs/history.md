@@ -72,6 +72,11 @@ existed.
 - **2026-11-13, pi-claude-code at `d5b5e04`: 39/39** (Claude Code 2.1.318, Opus 5.5,
   thinking `low`). The same steps, without the bridge-only ones. Nothing billed to
   Extra Usage. pier switched to it that day.
+- **2026-11-23, pi 1.6.0 on Node 26.12.1: 38/38** (Claude Code 2.1.329). The checks in
+  `run.ts` are the ones of 2026-11-13; why that run counted 39 wasn't found. Durable
+  released the warm Claude Code on `harness.close()` itself, with the gate's own call
+  removed: "every host exited by itself" passed. The prompt cache held as before: 95–98%
+  on a second turn, 97% after 6 minutes idle.
 
 **The prompt cache**, measured on 2026-11-13 with a 6-minute idle between two turns:
 

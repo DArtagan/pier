@@ -71,6 +71,8 @@ these rest on are in `AGENTS.md` and `docs/upstream.md`; the history behind them
      commits.
   2. Re-check what pier's docs and specs claim against them.
   3. Run the tests and the gate.
+
+  `docs/updating.md` spells this out.
 - **pier's versions are its own.** It builds from its own lockfile, not from the pi
   nixpkgs ships.
 - **Watch Earendil's direction.** Before building a new piece, read what's new in
@@ -132,8 +134,8 @@ Each cost a failure to learn. Detail is in `AGENTS.md`; new work must respect th
 - **Process groups:** tools and Claude Code run detached, in process groups of their
   own. Only a control-group kill reaps them, so the service must keep
   `KillMode=control-group`.
-- **Provider resources:** Durable never releases them; the host calls
-  `cleanupSessionResources()`.
+- **Provider resources:** Durable releases them only when the Harness closes (1.6.0);
+  the host calls `cleanupSessionResources()` when a conversation idles.
 - **IDs:** Durable's ids share one counter across all records. Never show them to
   people; pier numbers conversations itself.
 - **Directories:** Claude Code reports its own working directory to the model, so each
