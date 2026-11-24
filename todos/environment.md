@@ -530,6 +530,13 @@ treatment as a: pier adds `# Environment update` / `The date has changed. Today'
 is now …` when a conversation's first request of a day finds the recorded date stale,
 about 30 tokens, cache kept. That one fixes every conversation today, not only `/cd`.
 
+Decided (Will, 2026-11-24): *"Let's go with a for now, upstream fixes noted in that todo
+spec, and the option of workaround b if in the future we find it necessary to correct
+the block."* So `/cd` adds the note, and so does a conversation's first request of a new
+day. c and d are in `todos/upstream.md` ("pi-claude-code: a recorded environment block
+that goes stale"). b is kept as a tested fallback (`experiments/cwd/act.ts`, `refresh`),
+to use only if daily use shows the stale block misleading the model.
+
 ### b. Can a conversation change working directories?
 
 Yes, and Durable supports it: `Conversation.configure({ cwd })` changes `pi.agent` in one
@@ -977,10 +984,8 @@ The Variables and Credentials groups stay the same under any of them.
 
 ## Open questions for Will
 
-1. **`/cd` and the date:** a note in Claude Code's own words when the directory changes,
-   and when the day does (option a), with the proper fix (c or d) added to
-   `todos/upstream.md` for when Will takes it up? Or the refresh workaround (b) now, for a
-   correct block at the cost of one full cache write per change?
+None left from the drafts of 2026-11-24. What remains is the plan: the order to build
+the contract in, with `todos/remote.md`.
 
 Deferred to implementation (Will, 2026-11-24): which machines and users an agent's SSH
 key reaches.

@@ -35,6 +35,9 @@ Everything below is Claude's proposal until Will agrees, except what's marked de
   that provides real isolation. No store preferences yet."* And: *"Otherwise the
   todos/credentials.md spec is a good start."* He asked what principle 5 means (below).
   Principle 6 is kept, with principle 11's caveat; no store is ruled in or out.
+- **Principles 5 and 7** (Will, 2026-11-24, on the explanation of 5 and on 7): *"Yes on
+  both accounts, well done."* The decision moves closer to the moment of use as the tier
+  rises; values are never stored in pier's SQLite file.
 - **A project's `.env` passes to conversations in that project** (Will's axiom,
   2026-11-24).
 - **An allowlist**, never a denylist, for what reaches a tool (Will, 2026-11-24).
@@ -205,12 +208,8 @@ In order, once Will has settled the principles:
 
 ## Open questions for Will
 
-1. **Principle 5**, as explained above: does "the decision moves closer to the moment
-   of use as the tier rises" match what you want?
-2. **Principle 7:** values never in pier's SQLite file, agreed? (No store preference yet,
-   by Will's answer.)
-3. **The rest:** any principle to change or drop now, or leave them as a start and come
-   back when designing?
+1. **The rest of the principles:** keep them as a start (Will called the spec "a good
+   start") and revisit each when its design question comes up?
 
 ## Done when
 
