@@ -67,6 +67,18 @@ Will, later on 2026-11-24, on the second draft:
   granted" means and how (c); whether a config file the daemon owns is best practice,
   and in something more human-editable than JSON (d).
 
+Will, later still on 2026-11-24, on the third draft:
+
+- **Measure `/cd` with real Claude:** *"Great, run it with real Claude so we know."* Run
+  that day; see "Why changing directory costs the prompt cache".
+- **A project's `.env`:** the axiom that a conversation pointed at a project may see its
+  `.env`, and a credentials system, its principles first, for moving those secrets into
+  stronger control later; and a skill or the like so the model knows its environment
+  holds secrets. Quoted in full under question c; the credentials system is
+  `todos/credentials.md`.
+- **The configuration:** *"Great, let's go with a daemon-owned YAML config with schema
+  checking."*
+
 ## Findings
 
 ### What changed upstream since 2026-11-18 (read 2026-11-24)
@@ -366,16 +378,59 @@ and written to the cache again. What a directory change touches, from the code
     messages, the whole conversation, would be a cache miss once: a full re-read at full
     price, as after an hour idle.
 
-  What actually happens on a `cwd` change isn't checked: a new Claude Code process
-  starts (the `cwd` is in its fingerprint), and whether pi-claude-code then reuses the
-  recorded message (stale directory, cache kept) or records a new one (right directory,
-  cache lost) needs a run with real Claude, by hand or in the gate.
+**Measured with real Claude (2026-11-24, `experiments/cwd/run.ts`).** Four Opus turns
+at low thinking, Claude Code 2.1.329: two in directory `alpha`, then
+`configure({ cwd: bravo })`, then two in `bravo`. Each turn asked the model to quote
+both the directory in its environment information and the one in pier's `<cwd>`
+section, and the run caught each request body pi-claude-code sent upstream.
 
-So "costs the prompt cache" was too strong as stated. pier's own part costs a few tokens
-once; Claude Code's environment block either keeps a stale directory or costs one full
-re-read. The `/cd` command will need that checked, and probably a choice between the
-two; a fork (`/fork`) already pays the full re-read once, and was measured at 99.8%
-cached afterwards.
+| Turn | Cached | Model's answer (environment / `<cwd>`) | Where `bravo` appears in the request |
+|---|---|---|---|
+| 1. alpha, cold | 64.2% | alpha / alpha | nowhere |
+| 2. alpha, warm | 89.6% | alpha / alpha | nowhere |
+| 3. bravo, just after the change | 69.9% | **alpha** / bravo | one new system message: `Updated system prompt section "cwd"` |
+| 4. bravo, again | 91.4% | **alpha** / bravo | the same, and the model's last answer |
+
+What that shows:
+
+- **The prompt cache survives a change of directory.** Turn 3 read 1,546 tokens from the
+  cache and wrote 664, close to turn 1's shape; turn 4 was back above 90%. pier's
+  changed `<cwd>` section arrives as one new system message after the history, as
+  Durable promises, so everything before it still matches. Nothing like a full re-read.
+- **But Claude Code's environment message keeps the old directory.** In turns 3 and 4
+  the request still began with "Primary working directory: …/alpha-directory", and the
+  model quoted it. pi-claude-code replays the environment message it recorded on the
+  conversation's first request, for the life of the conversation, even though a new
+  Claude Code process was started in `bravo` (its `cwd` is in the process's
+  fingerprint). Of the two outcomes guessed above, it's the first: cache kept, stale
+  directory.
+- **pier's `ConversationDirectories` workaround only covers a conversation's first
+  directory.** It makes Claude Code *start* in the right place; pi-claude-code then pins
+  what Claude Code said on that first start.
+- **The model was told two directories, and when asked, reported both faithfully.** It
+  didn't say which was right. A model that runs `pwd` would find `bravo` (tools run in
+  the conversation's `cwd`), but one that trusts its environment block would write
+  paths under `alpha`.
+
+So a `/cd` that only calls `configure({ cwd })` costs almost nothing in cache, and leaves
+the model with a contradiction. Options, for when `/cd` is built:
+
+- a. **Say it in the conversation:** `/cd` also adds a short system note ("The working
+  directory is now …; the environment information's directory is out of date"). Cheap,
+  and keeps the cache; relies on the model weighing the note over the block.
+- b. **Make pi-claude-code record the environment again** when the directory changes,
+  so the start of the request names the new directory. That changes the request's
+  prefix: one full re-read, as after a fork. It needs a change upstream (a provider
+  option, or not pinning the recorded message across a `cwd` change), alongside the one
+  `todos/upstream.md` already lists for the directory.
+- c. **`/cd` forks:** a new conversation in the new directory, with the history, as
+  `/fork` does. One full re-read; no contradiction, at the cost of a new conversation
+  number.
+
+Proposal: a now, since it's pier's alone and keeps the cache; b raised upstream with the
+existing directory gap, when Will takes `todos/upstream.md` up. Not checked: whether the
+model acts on the right directory under a (it answered a question about both; it wasn't
+asked to work).
 
 ### b. Can a conversation change working directories?
 
@@ -452,15 +507,31 @@ Alternatives, for how a project's toolchain reaches a tool:
 | e. **None: the model runs the project's tools itself** | `devenv shell -- npm test`, guided by AGENTS.md | Nothing hidden; the model sees exactly what runs | Every command longer; the model forgets; slow per call |
 | f. **Language-level environments** (mise, asdf, a venv) | the project's own tool manager | Portable beyond Nix | Not Will's convention; still needs one of a–e to reach the shell |
 
-Proposal: a, with three changes the checks call for:
+Proposal: a, with two changes the checks call for:
 
 - give direnv the whole login environment, and keep only what it changes;
 - evaluate in the background when a conversation is created or a watched file changes,
   and tell the model in its prompt while the project's environment isn't ready, or
-  wasn't allowed;
-- keep a project's secrets out of a tool's variables unless granted (below).
+  wasn't allowed.
 
-**The problem this solves, in Will's vulcanus-proxmox** (checked 2026-11-24). Its
+**Decided (Will, 2026-11-24): a project's `.env` passes as it is.** *"Perhaps we can
+make the simplifying axiom that if a session is pointed at a project, and that project
+contains a .env with sensitive values, then that session is allowed to see those
+sensitive values. What matters more then is designing a good "Credentials" system such
+that a project's sensitive values previously stored in the `.env` file can be later
+migrated to the "Credentials" system - allowing stronger access controls. In this
+conceiving, one should define the principles behind the Credentials system before then
+designing the implementation. Likewise, we should perhaps make a skill or somesuch so
+the model isn't suprised that its environment contains sensitive values that could
+become accidentally exfiltrated and can mitigate its commands accordingly."*
+
+So project variables are whatever the project's toolchain exports, `.env` included,
+with no filtering by pier. Pointing a conversation at a project grants it that project's
+secrets. The credentials system (`todos/credentials.md`) is where they move to when a
+project wants stronger control. The rest of this section is the analysis that led
+there, kept for the record; the filtering it proposed is set aside.
+
+**The problem, in Will's vulcanus-proxmox** (checked 2026-11-24). Its
 `devenv.nix` has `dotenv.enable = true`, so entering the project loads its `.env` file
 into the shell. direnv's export there has 90 variables. 19 come from `.env`, among them
 `PROXMOX_API_PASSWORD`, `GMAIL_PASSWORD`, `PM_PASS`, `TF_VAR_proxmox_api_token_secret`,
@@ -478,7 +549,8 @@ does (a new language adds its own: `GOPATH`, `CARGO_HOME`, `JAVA_HOME`). Listing
 in advance means a tool breaks whenever a project adds one, until Will widens the list.
 That's what "an open set" meant.
 
-**What's proposed instead: tell the two kinds apart by where they come from.**
+**What was proposed, and set aside by Will's axiom: tell the two kinds apart by where
+they come from.**
 
 - **The toolchain's variables pass:** what devenv's Nix shell sets (`PATH`, `CC`,
   `DEVENV_*`, `PYTHONPATH`, …). They're written in `devenv.nix`, in the repository, and
@@ -521,6 +593,41 @@ case; the others are a project's own mistake, since `devenv.nix` is committed.
 The interface is "a source of project variables for a directory", so b or f can stand
 beside it later. On a machine without Nix, direnv alone still covers projects with an
 `.envrc`.
+
+**Telling the model** (Will's "a skill or somesuch"). The model should know its shell may
+hold secrets, so it doesn't print them into the transcript (where they're stored, sent
+to Anthropic, and kept in the SQLite backups). Options:
+
+- a. **A skill**, `secrets-in-the-environment`, offered with pier's skills: the model
+  reads it when its description matches a task. Cheap, and in the format pier already
+  uses. But a skill is read on demand, and the moment that matters (about to run `env`
+  or `set -x`, or to `cat .env`) doesn't announce itself, so the model may never open it.
+- b. **A prompt section, always present when it applies:** pier knows when a
+  conversation's project variables include a `.env`'s (it can read the names), so a
+  short section says so, names the variables (never values), and gives the rules. A few
+  dozen tokens; changes only when the names do, so it keeps the cache.
+- c. **Both:** the section states the fact and the variable names, and points to a
+  skill with the longer guidance (how to check a variable is set without printing it,
+  how to keep secrets out of logs and commits, what to do if one leaks).
+- d. **A guard as well as advice:** an `afterTool` hook that replaces any value of a
+  named secret in a tool's result with `[redacted: NAME]` before the model or the
+  transcript sees it. Durable's `afterTool` can replace a result (README, "Hooks"), and
+  pier knows the values (the tool's own variables). It catches the accident advice
+  can't: a test that prints its config, a stack trace with a URL. It can't catch a value
+  transformed (base64, split across lines).
+
+The guidance itself, whichever carries it:
+
+- check a variable is set with `[ -n "$NAME" ]` or `printenv NAME >/dev/null`, never
+  `echo`, `env`, `printenv` or `set` unfiltered;
+- no `set -x` or verbose flags (`curl -v`, `ssh -v`) on commands that carry secrets;
+- never `cat` a `.env`, secrets file or SOPS-decrypted file; read names with
+  `cut -d= -f1`;
+- never write a secret into a file that git tracks, a commit message, a PR, or an issue;
+- if one is printed, say so, so Will can rotate it.
+
+Proposal: c, and d as well, since advice fails silently and redaction is cheap. The
+skill and the section are layer code (`src/layer/`): p3 needs the same.
 
 ### d. The service and the daemon
 
@@ -569,7 +676,8 @@ for a daemon run by a service manager:
 | **YAML** | Comments; reads well for nested lists (projects, grants); pier already has the `yaml` package in its tree, through pi-coding-agent's frontmatter parser (2.9.0, checked 2026-11-24); `gh` and Kubernetes use it | Indentation matters; surprising implicit types (`no` as false, `1.10` as a number); several dialects |
 | **TOML** | Comments; no indentation rules; explicit types; Rust's and Python's tools, Alacritty and Starship use it | A dependency (`smol-toml`); deeply nested tables are clumsier; less familiar for lists of records |
 
-Proposal: YAML, as Will suggested. It's the most readable for the nested shape here
+Decided (Will, 2026-11-24): *"Great, let's go with a daemon-owned YAML config with
+schema checking."* The reasons, as proposed: YAML is the most readable for the nested shape here
 (projects with grants, credentials in tiers), the parser is already in the tree, and
 Nix writes it with `pkgs.formats.yaml`. The implicit-types trap is closed by validating
 the parsed file against a schema (pier already uses `pi-schema` for its protocol) and
@@ -687,10 +795,12 @@ idea"*). What agents need, from Will and the checks:
 
 Options for each tier:
 
-- **Tier 1, project and tools.** Allowed by name in pier's configuration, per project or
-  for all (a `GH_TOKEN` for a fine-grained token made for agents; a project's `.env`
-  names allowed for that directory). The tools' own config files stay readable, since
-  reach isn't enforced yet.
+- **Tier 1, project and tools.** A project's `.env` reaches a conversation in that
+  project as it is (Will's axiom, 2026-11-24, above). Credentials not tied to a project
+  (a `GH_TOKEN` for a fine-grained token made for agents, decided) are granted by name
+  in pier's configuration. The tools' own config files stay readable, since reach isn't
+  enforced yet. How a project's secrets move from `.env` into stronger control is
+  `todos/credentials.md`.
 - **Tier 2, infrastructure: SSH.** Options:
   - a. **An agent key of its own**, made for agents, authorized only on the machines
     agents may reach (vulcanus, mini-nas), and only as the users they may be. Offered
@@ -764,15 +874,12 @@ The Variables and Credentials groups stay the same under any of them.
 
 ## Open questions for Will
 
-1. **Project variables (c):** the toolchain's pass, a project's `.env` names are held
-   back unless granted in pier's configuration? Or an allowlist of patterns for all of
-   them, or turning devenv's `dotenv` off for agents?
-2. **The configuration (d):** `~/.config/pier/config.yaml`, owned by the daemon,
-   validated against a schema, written by Nix on Will's hosts and by hand elsewhere,
-   with the unit doing only supervision?
-3. **`/cd` and the prompt cache:** when the directory changes, should Claude Code's
-   environment block keep the old directory (cache kept) or take the new one (one full
-   re-read)? To be measured with real Claude before choosing.
+1. **Telling the model about secrets:** a prompt section naming the project's secret
+   variables plus a skill with the guidance (c), and an `afterTool` hook that redacts
+   their values from tool results (d)?
+2. **`/cd`:** measured: the cache survives, but Claude Code keeps telling the model the
+   old directory. Add a note to the conversation when the directory changes (a), and
+   raise the rest upstream later (b)?
 
 Deferred to implementation (Will, 2026-11-24): which machines and users an agent's SSH
 key reaches.

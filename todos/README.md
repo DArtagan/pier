@@ -34,8 +34,14 @@ that name themselves. Waits on `environment.md`; the directory is still open.
 **[environment.md](environment.md) — the environment contract: what a conversation's tools run with**
 Asked for by Will on 2026-11-24: define an environment's parts as a contract, keep
 everything else from tools, then choose each part's source. Decided that day: panes stop
-passing their whole environment (reversing 2026-10-29), and an allowlist. The contract
-in four groups, checked by running on thenixbeast; proposals and open questions.
+passing their whole environment (reversing 2026-10-29), an allowlist, four groups, base
+variables from the login shell, a project's `.env` passing as it is, and a daemon-owned
+YAML config with a schema. `/cd` measured with real Claude.
+
+**[credentials.md](credentials.md) — credentials: principles first, then a design**
+Asked for by Will on 2026-11-24: a system that a project's secrets can move into from
+`.env`, for stronger control, with its principles settled before its design. Thirteen
+proposed principles, the tiers he chose, and the design questions that follow.
 
 ## Writing a spec
 
