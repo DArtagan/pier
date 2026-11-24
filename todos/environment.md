@@ -413,24 +413,122 @@ What that shows:
   paths under `alpha`.
 
 So a `/cd` that only calls `configure({ cwd })` costs almost nothing in cache, and leaves
-the model with a contradiction. Options, for when `/cd` is built:
+the model told two directories. Will then asked (2026-11-24) for extensive testing, for
+the question of reloading Claude Code on a change, and for how the environment line is
+made and whether anything can be overridden. That's the next three sections.
 
-- a. **Say it in the conversation:** `/cd` also adds a short system note ("The working
-  directory is now …; the environment information's directory is out of date"). Cheap,
-  and keeps the cache; relies on the model weighing the note over the block.
-- b. **Make pi-claude-code record the environment again** when the directory changes,
-  so the start of the request names the new directory. That changes the request's
-  prefix: one full re-read, as after a fork. It needs a change upstream (a provider
-  option, or not pinning the recorded message across a `cwd` change), alongside the one
-  `todos/upstream.md` already lists for the directory.
-- c. **`/cd` forks:** a new conversation in the new directory, with the history, as
-  `/fork` does. One full re-read; no contradiction, at the cost of a new conversation
-  number.
+### How Claude Code's environment block is made, and kept (2026-11-24)
 
-Proposal: a now, since it's pier's alone and keeps the cache; b raised upstream with the
-existing directory gap, when Will takes `todos/upstream.md` up. Not checked: whether the
-model acts on the right directory under a (it answered a question about both; it wasn't
-asked to work).
+Read from Claude Code 2.1.329's bundled JavaScript (`strings` of its binary; the
+functions are minified, so the names below say what they do, not what they're called)
+and pi-claude-code at `d5b5e04` (still its newest commit on 2026-11-24). Checked with
+`experiments/cwd/env-block.ts`, which runs Claude Code against a stub API on loopback
+and keeps the request bodies (no tokens spent).
+
+- **Claude Code builds it from its own process**, on each run: the working directory is
+  its process's `cwd`; then whether that's a git repository or worktree, the platform,
+  the shell (with the login shell from `SHELL`), the OS version, two fixed safety notes,
+  the model's name and ID, and today's date. It's sent as a system message right after
+  the first user message, with a cache breakpoint on it.
+- **In a worktree it says more:** that it's a worktree, not to `cd` to the repository's
+  root, and to avoid a bare `git stash` (checked).
+- **Claude Code has its own wording for a change mid-session.** Its interactive session
+  notices a changed directory, date, worktree or scratchpad and sends an update rather
+  than a new block: `# Environment update` / `Primary working directory: <new> (was
+  <old>)`, and `The date has changed. Today's date is now <date>.` pier never sees these:
+  each pi-claude-code request is a fresh `claude -p` run, which always sends the whole
+  block.
+- **pi-claude-code records the block once and replays it.** After a conversation's first
+  request it stores Claude Code's system messages (environment and date) in the
+  conversation, inside the answer's replay diagnostic (`claude-code.native-assistant.v1`,
+  field `initialSystemMessages`). From then on it rewrites every request so those stored
+  messages replace whatever Claude Code just generated (`rewriteInitialRequest`). That
+  keeps the start of the request byte-identical, which is what keeps the prompt cache
+  warm across runs, processes and restarts.
+- **It drops the recording when the model changes, and only then.** Its `prepareMessages`
+  strips replay diagnostics from answers by another model; with none left, the block
+  Claude Code just made goes through, and is recorded afresh. Checked with real Claude
+  (`experiments/cwd/model.ts`): after `/model` from Opus to Sonnet, the request carried
+  "You are powered by the model named Sonnet 5.5". A change of directory has no such
+  rule, so the old directory stays.
+- **Claude Code is already restarted on a change of directory.** pi-claude-code's warm
+  process is keyed by a fingerprint that includes the `cwd`, so a new directory gets a
+  new Claude Code, started there (seen in every trial below: "started in alpha, alpha,
+  bravo, bravo"). The new process does generate a block naming the new directory, and
+  pi-claude-code replaces it with the recorded one. So reloading a Claude Code session
+  already happens, and on its own changes nothing the model sees.
+- **The date goes stale the same way, today, without any `/cd`.** In Will's live store
+  (copied, read-only, 2026-11-24), 15 conversations recorded a block, and **498 of their
+  1,746 answers were given under a recorded date that wasn't the day of the answer**.
+  Conversation 4995 (Durable's id) ran from 2026-11-17 to 2026-11-24 and was told
+  "Today's date is 2026-11-17" throughout. No conversation's recorded directory ever
+  changed: none has had its `cwd` changed.
+- **Claude Code's switches don't help** (checked with the stub):
+  `--exclude-dynamic-system-prompt-sections` ("moves per-machine sections … into the
+  first user message", but only with the default system prompt, and pi-claude-code
+  passes its own) left the block unchanged; so did `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`;
+  `CLAUDE_CODE_HIDE_CWD` only hides the directory in Claude Code's own terminal header.
+
+### What /cd does to the model (tested 2026-11-24)
+
+`experiments/cwd/act.ts`, with real Claude Code (Opus 5.5, low thinking): in each trial
+the model writes `marker.txt` "in the current project directory" in `alpha`, the
+directory changes to `bravo`, it writes another "in the current project directory", then
+says where it is. Three ways of handling the change:
+
+- `bare`: `configure({ cwd })` alone (pier's `<cwd>` section is updated);
+- `note`: and a note in Claude Code's own words, `# Environment update` /
+  `Primary working directory: <bravo> (was <alpha>)`;
+- `refresh`: and a `beforeRequest` hook that, when the recorded directory isn't the
+  conversation's, strips the recording from the request, so pi-claude-code keeps the
+  block Claude Code just made, and records that instead (as it does for a model change).
+
+Twelve trials: one of each on a short conversation, then three of each after the model
+had read a 60 KB file (about 23,000 tokens of history), so a re-read would show.
+
+| Variant | Wrote in the right directory | Said it was in | Environment line afterwards | The change's first request, long history |
+|---|---|---|---|---|
+| bare | 4 of 4 | bravo | still alpha | read 23,432–23,466 from cache, wrote 206–221 |
+| note | 4 of 4 | bravo | still alpha | read 23,430, wrote 313–316 |
+| refresh | 4 of 4 | bravo | **bravo** | read 1,516, **wrote 22,126–22,139** |
+
+What it shows:
+
+- **The model followed the directory pier tells it in every trial, even with the stale
+  line.** It used absolute paths under `bravo`, and several answers said the directory
+  had changed. pier's `<cwd>` section, arriving after the history, won over the block
+  near the start. In one trial it ran `pwd` to be sure.
+- **A note costs about 100 tokens more than nothing**, and keeps the cache.
+- **A refresh puts the right directory at the start of the request, at the cost of one
+  full cache write of the history**: everything after the block is written again, once
+  (22,000 tokens here; a long real conversation, 100,000 or more). Cache writes cost
+  about twice a normal input token, reads a tenth, so that one request costs about as
+  much as fifteen ordinary ones. On Will's subscription it's quota, not money.
+  Afterwards the cache is warm again (96–98%). It's the same cost a `/model` switch
+  already pays.
+- **Not tested:** harder work than writing a file (a build, or a long task where the
+  model reaches back for paths it used earlier), other models, and conversations days
+  old. Twelve trials of one simple task show the stale line isn't routinely harmful;
+  they don't show it never is.
+
+### What can be overridden, and what would work
+
+| Option | Where | Effect | Cost | Verdict |
+|---|---|---|---|---|
+| Restart Claude Code on a change | already done by pi-claude-code | none on what the model sees | — | not a fix on its own |
+| Claude Code's flags and variables | `claude` | none (checked) | — | ineffective |
+| a. **A note**, in Claude Code's own `# Environment update` words | pier, at `/cd` | right behaviour in 4 of 4; the block still names the old directory | ~100 tokens, cache kept | **now** |
+| b. **Refresh the recording** (a `beforeRequest` hook stripping `initialSystemMessages` when the directory differs) | pier, as a workaround | the block names the new directory | one full cache write of the history | works (4 of 4); reaches into pi-claude-code's private replay format, so it breaks silently if that changes |
+| c. **The same rule upstream:** drop the recording when the `cwd` differs, as pi-claude-code already does when the model differs | pi-claude-code | as b, without pier knowing the format | as b | **the proper fix** |
+| d. **Upstream, cheaper:** pi-claude-code inserts Claude Code's own `# Environment update` (directory and date) where the change happened, keeping the recording | pi-claude-code | right directory and date, in Claude Code's words, cache kept | as a | best of both, more work upstream |
+| e. **`/cd` forks** | pier | no contradiction; a new conversation number | one full re-read | heavier than b |
+
+Proposal: a for `/cd` now; c or d added to `todos/upstream.md` with the directory gap
+already there (on hold, by Will's choice). b stays here as a tested fallback in case the
+stale line ever misleads the model in daily use. And the **date** gets the same
+treatment as a: pier adds `# Environment update` / `The date has changed. Today's date
+is now …` when a conversation's first request of a day finds the recorded date stale,
+about 30 tokens, cache kept. That one fixes every conversation today, not only `/cd`.
 
 ### b. Can a conversation change working directories?
 
@@ -628,6 +726,11 @@ The guidance itself, whichever carries it:
 
 Proposal: c, and d as well, since advice fails silently and redaction is cheap. The
 skill and the section are layer code (`src/layer/`): p3 needs the same.
+
+Decided (Will, 2026-11-24): *"Telling the model: Sure, let's follow your proposal."* So
+c and d: a prompt section naming the project's secret variables (names, never values),
+a skill with the guidance above, and an `afterTool` hook that replaces their values in
+tool results with `[redacted: NAME]`.
 
 ### d. The service and the daemon
 
@@ -874,12 +977,10 @@ The Variables and Credentials groups stay the same under any of them.
 
 ## Open questions for Will
 
-1. **Telling the model about secrets:** a prompt section naming the project's secret
-   variables plus a skill with the guidance (c), and an `afterTool` hook that redacts
-   their values from tool results (d)?
-2. **`/cd`:** measured: the cache survives, but Claude Code keeps telling the model the
-   old directory. Add a note to the conversation when the directory changes (a), and
-   raise the rest upstream later (b)?
+1. **`/cd` and the date:** a note in Claude Code's own words when the directory changes,
+   and when the day does (option a), with the proper fix (c or d) added to
+   `todos/upstream.md` for when Will takes it up? Or the refresh workaround (b) now, for a
+   correct block at the cost of one full cache write per change?
 
 Deferred to implementation (Will, 2026-11-24): which machines and users an agent's SSH
 key reaches.

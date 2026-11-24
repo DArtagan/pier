@@ -30,6 +30,11 @@ Everything below is Claude's proposal until Will agrees, except what's marked de
   for agents."*).
 - **Which machines and users an agent's SSH key reaches** waits for implementation
   (Will, 2026-11-24).
+- **On the first draft** (Will, 2026-11-24): *""use without exposure" is a great
+  principle. A solid start with the accepted caveat that a sandbox is the only thing
+  that provides real isolation. No store preferences yet."* And: *"Otherwise the
+  todos/credentials.md spec is a good start."* He asked what principle 5 means (below).
+  Principle 6 is kept, with principle 11's caveat; no store is ruled in or out.
 - **A project's `.env` passes to conversations in that project** (Will's axiom,
   2026-11-24).
 - **An allowlist**, never a denylist, for what reaches a tool (Will, 2026-11-24).
@@ -101,6 +106,23 @@ Each with why. The design must keep all of them, or say which it bends and why.
    tier 2 grants are per project or per conversation, and narrow; tier 3 is never
    standing: it's asked for each time, or Will does it himself. *Why:* the tiers exist
    because the damage differs.
+
+   *What it means* (Will asked, 2026-11-24). "Attention" is how often, and how recently,
+   Will must have looked at a use of a credential before it happens. The worse a misuse
+   could be, the closer to the moment of use his decision should be:
+
+   | Tier | Worst misuse | When Will decides | How, for example |
+   |---|---|---|---|
+   | 0 | none | never | nothing to grant |
+   | 1, project and tools | a project's API tokens or a narrow GitHub token used wrongly: recoverable, one project | once, ahead of time | a standing grant in the YAML config, reviewed like code; the project's `.env` (the axiom) |
+   | 2, infrastructure | SSH into vulcanus or the NAS as root: other machines changed | per project or per conversation, when work there starts | `/grant ssh vulcanus` in the TUI, ending with the conversation or after hours; a key that only some machines accept |
+   | 3, root here | this machine reconfigured, a backdoor installed | each time, at the moment of use | the tool waits until Will approves the exact command in the TUI (Durable's tools that park), or Will runs it himself |
+
+   So the further down the table, the shorter a grant lives and the more specific it is:
+   standing, then per session, then per command. It's the same rule `sudo` follows when
+   it asks again after a timeout, and Will's own rule for his SSH agent in dotfiles'
+   `todos/ssh-agent.md` (*"I must type my password and unlock the key for any new
+   terminal session"*), applied to agents.
 
 6. **Use without exposure, where possible.** A tool should be able to *use* a credential
    without the model or the transcript seeing its value: an SSH agent signs without
@@ -183,12 +205,12 @@ In order, once Will has settled the principles:
 
 ## Open questions for Will
 
-1. **The principles:** which to keep, change or drop? Anything missing?
-2. **Principle 6, use without exposure:** worth the extra machinery (an agent, helpers,
-   a proxy) for the credentials that allow it, or is an environment variable enough
-   until there's a sandbox?
-3. **Principle 7:** values never in pier's SQLite file, agreed? Any store Will would
-   rule out, or prefer (1Password, sops)?
+1. **Principle 5**, as explained above: does "the decision moves closer to the moment
+   of use as the tier rises" match what you want?
+2. **Principle 7:** values never in pier's SQLite file, agreed? (No store preference yet,
+   by Will's answer.)
+3. **The rest:** any principle to change or drop now, or leave them as a start and come
+   back when designing?
 
 ## Done when
 
