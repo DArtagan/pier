@@ -121,6 +121,8 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
 - `experiments/transcript/` measures the terminal client with a long transcript.
+- `experiments/cwd/` changes a conversation's directory with real Claude Code, and shows
+  which directory each part of the request names, and what it costs the prompt cache.
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
 - `todos/` holds specs for work not yet done.
