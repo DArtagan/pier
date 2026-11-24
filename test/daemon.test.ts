@@ -6,7 +6,11 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { Context as RequestContext, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import {
+	type Context as RequestContext,
+	registerSessionResourceCleanup,
+	type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import {
 	type FauxResponseStep,
@@ -15,7 +19,10 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import {
+	type ConversationId,
 	createRegistry,
+	defineExtension,
+	defineTask,
 	type EntryRecord,
 	Harness,
 	type LiveState,
@@ -47,7 +54,7 @@ describe("daemon", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	async function start(responses: FauxResponseStep[]): Promise<void> {
+	async function start(responses: FauxResponseStep[], releaseAfterMs?: number): Promise<void> {
 		faux.setResponses(responses);
 		const models = createModels();
 		models.setProvider(faux.provider);
@@ -57,6 +64,7 @@ describe("daemon", () => {
 			models,
 			model: { provider: "faux", modelId: "faux-1" },
 			extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+			...(releaseAfterMs === undefined ? {} : { releaseAfterMs }),
 		});
 	}
 
@@ -568,6 +576,191 @@ describe("daemon", () => {
 		release?.();
 		const view = await until(conversation, (latest) => idle(latest) && answered("slow answer")(latest));
 		expect(answered("queued one")(view)).toBe(false);
+	});
+
+	// pi-claude-code keeps a warm Claude Code per conversation until pi-ai's
+	// `cleanupSessionResources()` names its provider session (README, "Claude, through
+	// Claude Code"). The daemon releases it once the conversation idles; Durable releases
+	// every conversation's when the Harness closes.
+	describe("provider resources", () => {
+		const released: (string | undefined)[] = [];
+		let unregister: (() => void) | undefined;
+		beforeEach(() => {
+			released.length = 0;
+			unregister = registerSessionResourceCleanup((sessionId) => released.push(sessionId));
+		});
+		afterEach(() => unregister?.());
+
+		/** The provider session id of the conversation in `view`. */
+		const sessionOf = (view: TranscriptView) =>
+			(view.docs["pi.provider"] as { sessionId?: string } | undefined)?.sessionId;
+
+		async function answeredOnce(): Promise<string> {
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			await connected.request("submit", { text: "hi" });
+			const view = await until(conversation, (latest) => idle(latest) && answered("answer")(latest));
+			const sessionId = sessionOf(view);
+			if (sessionId === undefined) throw new Error("no provider session id");
+			return sessionId;
+		}
+
+		it("releases a conversation's once it has been idle a while", async () => {
+			await start([fauxAssistantMessage("answer")], 50);
+			const sessionId = await answeredOnce();
+			await expect.poll(() => released, { timeout: 2000 }).toContain(sessionId);
+		});
+
+		it("releases every conversation's when the daemon closes", async () => {
+			await start([fauxAssistantMessage("answer")]);
+			const sessionId = await answeredOnce();
+			expect(released).toEqual([]);
+			await daemon?.close();
+			daemon = undefined;
+			expect(released).toContain(sessionId);
+		});
+	});
+
+	// Durable blocks a task no installed definition can take: written by a newer Durable
+	// (`task_too_old`), or whose code is gone (`missing_task`). Its conversation waits for
+	// it, so the client must say so, and Esc must end it.
+	describe("blocked tasks", () => {
+		// Never installed in the daemon's registry, so Durable has no code for it.
+		const Uninstalled = defineTask<null, { phase: "run" }, null>({
+			name: "test.uninstalled",
+			version: 1,
+			initial: () => ({ phase: "run" }),
+			phases: { run: async () => {} },
+			abort: async () => {},
+		});
+		const blockIn = (id: ConversationId, background = false) =>
+			daemon?.harness.commit(
+				(tx) =>
+					tx.createTask(Uninstalled, null, {
+						ownership: { kind: "conversation" },
+						conversationId: id,
+						...(background ? { background } : {}),
+					}),
+				BACKGROUND_CONTEXT,
+			);
+
+		it("tells the attached client, says so in the list, and Esc ends it", async () => {
+			await start([]);
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			const id = conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			expect(conversation.blocked).toEqual([]);
+			const task = await blockIn(id);
+			await expect.poll(() => conversation.blocked.map((blocked) => blocked.id)).toEqual([task]);
+			expect(conversation.blocked[0]).toMatchObject({
+				kind: "test.uninstalled",
+				reason: "missing_task",
+				background: false,
+			});
+			const listed = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(listed?.blocked).toBe(true);
+
+			await connected.request("abort", {});
+			await expect.poll(() => conversation.blocked).toEqual([]);
+			const after = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(after?.blocked).toBeUndefined();
+			const ended = await daemon?.harness.getTask(task as never, BACKGROUND_CONTEXT);
+			expect(ended?.state).toMatchObject({ status: "terminal", outcome: { status: "orphaned" } });
+		});
+
+		it("tells a client that attaches after the task was blocked, as at a daemon's start", async () => {
+			await start([]);
+			const first = await client();
+			await first.conversation.attach({ kind: "new" }, dir, {});
+			const id = first.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id);
+			await expect.poll(() => first.conversation.blocked.length).toBe(1);
+			await daemon?.close();
+
+			// The task is in the store; a new daemon finds it blocked as it opens.
+			const logged: string[] = [];
+			const models = createModels();
+			models.setProvider(faux.provider);
+			daemon = await startDaemon({
+				socketPath,
+				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
+				models,
+				model: { provider: "faux", modelId: "faux-1" },
+				extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+				log: (message) => logged.push(message),
+			});
+			expect(logged.some((line) => /blocked: missing_task/u.test(line))).toBe(true);
+			const again = await client();
+			await again.conversation.attach({ kind: "id", id }, dir, {});
+			await expect.poll(() => again.conversation.blocked.map((task) => task.reason)).toEqual(["missing_task"]);
+		});
+
+		// Durable's remedy: the task waits, unchanged, and runs on once code that fits is there.
+		it("runs on, unblocked, once the daemon has the task's code", async () => {
+			await start([]);
+			const first = await client();
+			await first.conversation.attach({ kind: "new" }, dir, {});
+			const id = first.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			const task = await blockIn(id);
+			await expect.poll(() => first.conversation.blocked.length).toBe(1);
+			await daemon?.close();
+
+			const Installed = defineTask<null, { phase: "run" }, null>({
+				name: "test.uninstalled",
+				version: 1,
+				initial: () => ({ phase: "run" }),
+				phases: {
+					run: (_task, runtime, ctx) =>
+						runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
+				},
+				abort: async () => {},
+			});
+			const models = createModels();
+			models.setProvider(faux.provider);
+			daemon = await startDaemon({
+				socketPath,
+				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
+				models,
+				model: { provider: "faux", modelId: "faux-1" },
+				extensions: [
+					createPrompt({ agentDir: join(dir, "agent") }),
+					defineExtension({ name: "test.tasks", tasks: [Installed] }),
+				],
+			});
+			const again = await client();
+			await again.conversation.attach({ kind: "id", id }, dir, {});
+			const done = await daemon.harness.waitForTask(task as never, BACKGROUND_CONTEXT);
+			expect(done.state.outcome.status).toBe("completed");
+			await expect.poll(() => again.conversation.blocked).toEqual([]);
+		});
+
+		it("tells of a blocked background task, without marking the conversation blocked", async () => {
+			await start([]);
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			const id = conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id, true);
+			await expect.poll(() => conversation.blocked.map((task) => task.background)).toEqual([true]);
+			const listed = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(listed?.blocked).toBeUndefined();
+		});
+
+		it("doesn't tell a client attached to another conversation", async () => {
+			await start([]);
+			const stuck = await client();
+			await stuck.conversation.attach({ kind: "new" }, dir, {});
+			const other = await client();
+			await other.conversation.attach({ kind: "new" }, dir, {});
+			const id = stuck.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id);
+			await expect.poll(() => stuck.conversation.blocked.length).toBe(1);
+			expect(other.conversation.blocked).toEqual([]);
+		});
 	});
 
 	it("rejects requests before attaching", async () => {

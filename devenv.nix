@@ -8,11 +8,12 @@
 
   languages = {
     nix.enable = true;
-    # Node 24, as package.json's engines. The packages, pi's included, come from npm through
+    # Node 26, as package.json's engines, and as p3 runs ("node 26+ all the way", its
+    # decisions, 2026-11-18). The packages, pi's included, come from npm through
     # package-lock.json, whatever pi version nixpkgs ships (README, "Versions").
     javascript = {
       enable = true;
-      package = pkgs.nodejs_24;
+      package = pkgs.nodejs_26;
       npm = {
         enable = true;
         install.enable = true;

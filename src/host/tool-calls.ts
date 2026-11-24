@@ -39,7 +39,7 @@ export const DEQUEUE = "app.message.dequeue";
 
 /**
  * pi-tui's keybindings, plus pi's three the client uses, with pi's keys: Ctrl+O, Ctrl+T
- * and Alt+Up. pi's own app keymap (`KEYBINDINGS`) isn't exported in 1.5.2; without these,
+ * and Alt+Up. pi's own app keymap (`KEYBINDINGS`) isn't exported; without these,
  * pi's components' hints ("… more lines, ctrl+o to expand") name no key.
  */
 export function installKeybindings(): void {

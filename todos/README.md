@@ -21,6 +21,11 @@ Decided by Will on 2026-11-16, as an exception in `docs/principles.md`; deprecat
 once p3's web UI covers the same ground. Findings on Elanor, p3 and p2, then a plan
 that starts with a deep dive into sign-in.
 
+**[upstream.md](upstream.md) — changes to raise upstream, on hold**
+The gaps pier works around (an idle release in Durable, pi's theme exports, a working
+directory in pi-claude-code, pi-tui's private members), each with what would replace
+its workaround. On hold by Will's decision on 2026-11-24, until pier has settled.
+
 ## Writing a spec
 
 Every spec's work happens within `docs/principles.md`; a spec that needs to step

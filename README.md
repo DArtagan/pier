@@ -7,7 +7,7 @@ Like a pier: it stays put, and boats tie up and cast off.
 **Status:** a deliberately thin slice, in daily use: a daemon, a Unix socket, and a
 terminal client drawn with pi's own components. Claude runs on a Durable Harness
 through Claude Code, with your Claude subscription, and survives a crash mid-tool, Esc,
-compaction and forks (pi 1.5.2). See [`todos/`](todos/) for what's next.
+compaction and forks (pi 1.6.0). See [`todos/`](todos/) for what's next.
 
 ## Use
 
@@ -30,6 +30,21 @@ the daemon restarts, the client reconnects and carries on where it left off. Que
 messages stay above the editor until the run takes them in; the client's own lines
 ("new conversation #3", "compacting in the background", errors) go into
 the transcript, and scroll away with it.
+
+**Blocked.** When Durable has no code that fits one of a conversation's tasks, it
+blocks the task rather than ending it: no installed code takes it (`missing_task`), a
+newer pier started it (`task_too_old`, after going back to an older pier), or its saved
+state couldn't be brought up to date (`migration_failed`). The task waits, unchanged,
+and an ordinary one holds its conversation busy. Durable's remedy is the code that fits:
+run the pier (or install the extension) the task needs, and it carries on where it
+stopped. Esc gives it up instead, as Durable's "orphaned": none of the task's own code
+runs, so whatever cleanup it would have done is skipped.
+
+The client says so in the transcript, once: which task, why, what would run it, and
+what Esc costs. The editor's border reads `⚠ Blocked: … · Esc gives it up` in place of
+the working line while it lasts; `/resume`, `/tree` and `pier list` show the
+conversation as `blocked`; and the daemon logs it. A blocked background task holds
+nothing up and Esc doesn't reach it, so only the transcript and the log tell of it.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:
@@ -112,6 +127,8 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
 - `docs/vision.md` says what pier is for, and how it changes as p3 does.
 - `docs/principles.md` holds the principles all work on pier keeps to.
 - `docs/releasing.md` says how release-please makes versions.
+- `docs/updating.md` says how to move pier to a new pi release, and its dependencies
+  with it.
 - `docs/history.md` records Will's decisions, the gate's findings and the wrong turns.
 - `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
   going, as last read.
@@ -143,7 +160,9 @@ Things a host must know, all found by the gate:
 - **Release each conversation's warm Claude Code process.** pi-claude-code keeps one
   per conversation for straight continuations, and frees it when pi-ai's
   `cleanupSessionResources(sessionId)` is called with the conversation's provider
-  session id. pi does that when a session ends; Durable never does.
+  session id. pi does that when a session ends. Durable does it only when the Harness
+  closes, so pier's daemon also does it once a conversation has idled for five
+  minutes.
 - **Claude Code would run in the host's directory**, which it reports to the model as
   its working directory: pi-claude-code starts it in `process.cwd()`, and nothing in a
   request names a directory. pier's `ConversationDirectories` extension records each
@@ -203,9 +222,9 @@ conversation can reach is the place to revisit this.
 
 ## Versions
 
-pi's packages are pinned exactly in `package.json`, all to one release (1.5.2). Pi
+pi's packages are pinned exactly in `package.json`, all to one release (1.6.0). Pi
 Durable is experimental, and breaking changes land in minor releases, so bump them
-together and deliberately: read their changelogs, then run the tests and the gate.
+together and deliberately, as `docs/updating.md` says.
 
 pier doesn't follow the pi that nixpkgs ships (1.5.0 on 2026-11-12). Its packages come
 from its own lockfile, so nothing ties the two together. What pier shares with classic

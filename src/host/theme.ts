@@ -4,7 +4,7 @@
 // lose the backgrounds that tell pending, done and failed apart.
 //
 // Workaround: pi's `InteractiveThemeController`, which asks the terminal for its colors
-// (OSC 10, 11 and 4) and follows its light and dark switches, isn't exported in 1.5.2,
+// (OSC 10, 11 and 4) and follows its light and dark switches, isn't exported,
 // so this imports it from pi's `dist/` by path. Its module shares the theme with pi's
 // public entry, as `initTheme()` keeps it on `globalThis`. An export of the controller
 // (or of `setTerminalColors`) from pi's entry would replace this; not raised yet.

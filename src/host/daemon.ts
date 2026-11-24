@@ -31,6 +31,7 @@ import {
 	type LiveState,
 	ProviderDoc,
 	type Storage,
+	type TaskGraph,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
@@ -40,6 +41,7 @@ import { createPrompt } from "../layer/prompt.ts";
 import { createSkills } from "../layer/skills.ts";
 import {
 	type AttachTarget,
+	type BlockedTask,
 	type ConversationSummary,
 	DAEMON_CLOSING,
 	type Event,
@@ -155,7 +157,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	);
 
 	// Release a conversation's provider resources once it has been idle a while. Durable
-	// never does, unlike pi when a session ends (README, "Claude, through Claude Code").
+	// releases them only when the Harness closes, where pi does when a session ends
+	// (README, "Claude, through Claude Code"). Workaround: an idle release in Durable (it
+	// already has `settings.contextRetentionMs` for idle contexts) would replace this.
 	const releaseAfterMs = options.releaseAfterMs ?? 5 * 60_000;
 	const releases = new Map<ConversationId, NodeJS.Timeout>();
 	const release = async (conversationId: ConversationId) => {
@@ -185,9 +189,17 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		},
 		end: () => {},
 	});
+	// Durable's task graph says which tasks it can't run, and follows the registry: a task
+	// can be blocked at open (written by a newer Durable) or at any time after.
+	const blocked = new BlockedTasks(log);
+	const graph = await harness.watchTaskGraph(context);
+	blocked.update(graph.value);
+	graph.start(async (call) => {
+		if (call.kind === "value") blocked.update(call.value);
+	});
 	harness.resume();
 
-	const conversations = new ConversationAccess(harness, options);
+	const conversations = new ConversationAccess(harness, options, blocked);
 	await conversations.numberAll();
 	const connections = new Set<Connection>();
 	const server = createServer((_request, response) => {
@@ -216,11 +228,11 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 			for (const timer of releases.values()) clearTimeout(timer);
 			releases.clear();
 			runs.detach();
+			await graph.stop();
 			await Promise.all([...connections].map((connection) => connection.end(DAEMON_CLOSING)));
 			for (const socket of sockets.clients) socket.close(1001, "closing");
 			await new Promise<void>((resolve) => sockets.close(() => resolve()));
 			await new Promise<void>((resolve) => server.close(() => resolve()));
-			cleanupSessionResources();
 			await harness.close(context);
 			await rm(options.socketPath, { force: true });
 		})();
@@ -253,13 +265,73 @@ async function claimSocket(path: string): Promise<void> {
 	await rm(path, { force: true });
 }
 
+/** Each conversation's tasks that Durable can't run, from its task graph, for clients to show. */
+class BlockedTasks {
+	readonly #by = new Map<ConversationId, readonly BlockedTask[]>();
+	readonly #listeners = new Set<(conversation: ConversationId) => void>();
+	readonly #log: (message: string) => void;
+
+	constructor(log: (message: string) => void) {
+		this.#log = log;
+	}
+
+	of(conversation: ConversationId): readonly BlockedTask[] {
+		return this.#by.get(conversation) ?? [];
+	}
+
+	/** Call `listener` with each conversation whose blocked tasks change, until the returned function. */
+	subscribe(listener: (conversation: ConversationId) => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	update(graph: TaskGraph): void {
+		const next = new Map<ConversationId, BlockedTask[]>();
+		for (const node of Object.values(graph.tasks)) {
+			if (node.blocked === undefined) continue;
+			const tasks = next.get(node.conversationId) ?? [];
+			tasks.push({ id: node.id, kind: node.kind, reason: node.blocked, background: node.background });
+			next.set(node.conversationId, tasks);
+		}
+		const changed = new Set([...this.#by.keys(), ...next.keys()]);
+		for (const conversation of changed) {
+			const before = this.of(conversation);
+			const after = next.get(conversation) ?? [];
+			if (JSON.stringify(before) === JSON.stringify(after)) changed.delete(conversation);
+			else this.#logChange(conversation, before, after);
+		}
+		this.#by.clear();
+		for (const [conversation, tasks] of next) this.#by.set(conversation, tasks);
+		for (const conversation of changed) for (const listener of this.#listeners) listener(conversation);
+	}
+
+	#logChange(conversation: ConversationId, before: readonly BlockedTask[], after: readonly BlockedTask[]): void {
+		const ids = new Set(before.map((task) => task.id));
+		for (const task of after) {
+			if (!ids.has(task.id)) {
+				const background = task.background ? "background " : "";
+				this.#log(
+					`${background}task ${task.id} (${task.kind}) of conversation ${conversation} is blocked: ${task.reason}`,
+				);
+			}
+		}
+		const still = new Set(after.map((task) => task.id));
+		for (const task of before) {
+			if (!still.has(task.id))
+				this.#log(`task ${task.id} (${task.kind}) of conversation ${conversation} is no longer blocked`);
+		}
+	}
+}
+
 /** Finding, opening and listing conversations. */
 class ConversationAccess {
 	readonly harness: Harness;
+	readonly blocked: BlockedTasks;
 	readonly #options: DaemonOptions;
 
-	constructor(harness: Harness, options: DaemonOptions) {
+	constructor(harness: Harness, options: DaemonOptions, blocked: BlockedTasks) {
 		this.harness = harness;
+		this.blocked = blocked;
 		this.#options = options;
 	}
 
@@ -469,6 +541,8 @@ class ConversationAccess {
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/gu, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
+				// A blocked background task doesn't hold the conversation, so it isn't stuck.
+				...(this.blocked.of(record.id).some((task) => !task.background) ? { blocked: true } : {}),
 				activity: Number(newest?.id ?? record.id),
 			});
 		}
@@ -486,7 +560,7 @@ function assign(numbers: { last: number; conversations: Record<string, number> }
 
 /** One client connection, attached to at most one conversation at a time. */
 class Connection {
-	#attached: { conversation: Conversation; watch: ConversationWatch } | undefined;
+	#attached: { conversation: Conversation; watch: ConversationWatch; unfollowBlocked: () => void } | undefined;
 	readonly #socket: WebSocket;
 	readonly #conversations: ConversationAccess;
 	readonly #log: (message: string) => void;
@@ -550,6 +624,7 @@ class Connection {
 			case "dequeue":
 				return { texts: await this.#conversations.dequeue(this.#conversation()) };
 			case "abort":
+				// It ends an ordinary blocked task too: Durable orphans an aborted task it can't run.
 				await this.#conversation().abort(context);
 				return {};
 			case "compact":
@@ -576,8 +651,19 @@ class Connection {
 			(await tx.doc(ClientEnvDoc, conversation.id)).vars = { ...params.env };
 		}, context);
 		const watch = await conversation.watch(context, params.window);
-		this.#attached = { conversation, watch };
+		const sendBlocked = () =>
+			this.#send({
+				event: "blocked",
+				conversation: conversation.id,
+				tasks: this.#conversations.blocked.of(conversation.id),
+			});
+		const unfollowBlocked = this.#conversations.blocked.subscribe((changed) => {
+			if (changed === conversation.id && this.#attached?.watch === watch) sendBlocked();
+		});
+		this.#attached = { conversation, watch, unfollowBlocked };
 		this.#send({ event: "view", conversation: conversation.id, view: watch.value });
+		// After the view: the client follows a conversation from its view on.
+		sendBlocked();
 		watch.start(async (call) => {
 			if (call.kind === "value" && call.ops.length > 0) {
 				this.#send({ event: "ops", conversation: conversation.id, ops: call.ops });
@@ -599,6 +685,7 @@ class Connection {
 	async detach(): Promise<void> {
 		const attached = this.#attached;
 		this.#attached = undefined;
+		attached?.unfollowBlocked();
 		await attached?.watch.stop();
 	}
 

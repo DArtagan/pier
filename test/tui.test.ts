@@ -287,6 +287,21 @@ describe("answers, thinking and summaries", () => {
 		expect(show(transcript)).toContain("still weighing");
 	});
 
+	it("says why a run ended without an answer, and that an orphaned one skipped its cleanup", () => {
+		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
+		const failed = (reason: string, detail?: string) =>
+			show(
+				fill(style, [answer], {
+					runFailure: { taskId: 1, inputs: [], reason, ...(detail ? { detail } : {}) },
+				} as never),
+			);
+		expect(failed("model_error", "overloaded")).toContain("the run ended without an answer: model_error (overloaded)");
+		// What Durable's own "orphaned" means: no code of the task ran.
+		const orphaned = failed("orphaned", "task_too_old");
+		expect(orphaned).toContain("the run was given up without its cleanup: its task couldn't run here (task_too_old)");
+		expect(orphaned).not.toContain("ended without an answer");
+	});
+
 	it("updates one component as a response streams, and starts another for the next", () => {
 		const style = new TranscriptStyle(markdown, new ToolCalls(ui, "/tmp"));
 		const partial = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] }) as AssistantMessage;

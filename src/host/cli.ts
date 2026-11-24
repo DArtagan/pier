@@ -16,6 +16,7 @@ import { loadClaudeCodeProvider } from "../layer/claude-code.ts";
 import { createPrompt } from "../layer/prompt.ts";
 import { createSkills } from "../layer/skills.ts";
 import { PierClient } from "./client.ts";
+import { activity } from "./commands.ts";
 import { startDaemon } from "./daemon.ts";
 import { defaultModel, defaultThinkingLevel } from "./defaults.ts";
 import { skillPaths, socketPath, stateDir } from "./paths.ts";
@@ -78,7 +79,10 @@ async function list(all: boolean): Promise<number> {
 		const { conversations } = await client.request("list", all ? {} : { cwd: process.cwd() });
 		for (const summary of conversations) {
 			const where = all ? `  ${summary.cwd ?? ""}` : "";
-			console.log(`#${summary.number}${summary.busy ? " (working)" : ""}  ${summary.title ?? "(empty)"}${where}`);
+			const state = activity(summary);
+			console.log(
+				`#${summary.number}${state === undefined ? "" : ` (${state})`}  ${summary.title ?? "(empty)"}${where}`,
+			);
 		}
 		return 0;
 	} finally {

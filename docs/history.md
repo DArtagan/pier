@@ -72,6 +72,11 @@ existed.
 - **2026-11-13, pi-claude-code at `d5b5e04`: 39/39** (Claude Code 2.1.318, Opus 5.5,
   thinking `low`). The same steps, without the bridge-only ones. Nothing billed to
   Extra Usage. pier switched to it that day.
+- **2026-11-23, pi 1.6.0 on Node 26.12.1: 38/38** (Claude Code 2.1.329). The checks in
+  `run.ts` are the ones of 2026-11-13; why that run counted 39 wasn't found. Durable
+  released the warm Claude Code on `harness.close()` itself, with the gate's own call
+  removed: "every host exited by itself" passed. The prompt cache held as before: 95–98%
+  on a second turn, 97% after 6 minutes idle.
 
 **The prompt cache**, measured on 2026-11-13 with a 6-minute idle between two turns:
 
@@ -246,6 +251,20 @@ asks:
 Then the spec was closed (Will, 2026-11-17: *"any additional changes I can make as the
 need arises. If what is already in this spec is complete, then we can consider it
 complete"*).
+
+**Kept over pi-tui's own, by Will's decision** (2026-11-24), when the update to pi 1.6.0
+weighed removing them:
+
+- **The menu's nudges** (`asPicker`, `openArguments`). pi-tui opens a command's
+  argument menu when its space is typed, but not after Tab completes the command, nor
+  for a bare `/thinking`; and Enter on an argument fills the editor, needing a second
+  Enter. Will: Tab is *"genuinely worse"* without pier's, and the single Enter is
+  *"smoother and can stay (for now)"*, unless menus come to offer more than one
+  option to choose from.
+- **The history across sessions** (`fillHistory`). Without it Up recalls only what
+  the client typed since it started, or, filled without being cleared, every
+  conversation's at once. Will: *"I like that history can span sessions, it seems
+  like very useful functionality. And I sure wouldn't want it to span conversations."*
 
 ## Skills
 

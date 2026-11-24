@@ -43,7 +43,7 @@ import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./
 import { color, editorBorder } from "./colors.ts";
 import { asPicker, commandCompletions, openArguments } from "./commands.ts";
 import { Footer, footerState } from "./footer.ts";
-import { type AttachTarget, DAEMON_CLOSING, type ModelSummary } from "./protocol.ts";
+import { type AttachTarget, type BlockedTask, DAEMON_CLOSING, type ModelSummary } from "./protocol.ts";
 import { type Run, runEndingAt, runLine } from "./run-line.ts";
 import { startTheme } from "./theme.ts";
 import { installKeybindings, isDequeueKey, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
@@ -132,7 +132,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const editor = new CustomEditor(
 		tui,
 		{ borderColor: editorBorder(undefined), selectList: getSelectListTheme() },
-		// pi's app keymap class isn't exported in 1.5.2; pi-tui's (with pier's additions,
+		// pi's app keymap class isn't exported; pi-tui's (with pier's additions,
 		// `installKeybindings`) answers the same `matches` the editor asks.
 		getKeybindings() as ConstructorParameters<typeof CustomEditor>[2],
 		{
@@ -177,6 +177,12 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const status = (line: string) => notify(dim(line), "status");
 	const live = () => (view?.docs["pi.live"] ?? {}) as LiveState;
 	const busy = () => live().run !== undefined;
+	/** Whether Durable can't run one of the conversation's tasks, so nothing goes on until it's ended. */
+	// A blocked background task doesn't hold the conversation, and Esc doesn't reach it: it's
+	// told in the transcript, not the border.
+	const stuck = () => conversation.blocked.some((task) => !task.background);
+	/** The blocked tasks the transcript has already said, so each is said once. */
+	const told = new Set<number>();
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
 
 	/** The model's context window, asked of the daemon once per model; undefined until it answers. */
@@ -209,7 +215,13 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		}
 		fillTranscript(transcript, view, rendered, style, notices);
 		editor.borderColor = editorBorder((view.docs["pi.agent"] as AgentState | undefined)?.thinkingLevel);
-		working.update(busy() && client.connected);
+		working.update(
+			client.connected
+				? stuck()
+					? { kind: "blocked", message: blockedLine(conversation.blocked.filter((task) => !task.background)) }
+					: { kind: busy() ? "working" : "idle" }
+				: { kind: "idle" },
+		);
 		footer.update(footerState(view, windowOf(view)), statusText(conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
@@ -230,8 +242,15 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				filling = false;
 			});
 	};
+	/** Say newly blocked tasks once in the transcript, with why and what to do; the border says it while it lasts. */
+	const tellBlocked = () => {
+		const fresh = conversation.blocked.filter((task) => !told.has(task.id));
+		for (const task of fresh) told.add(task.id);
+		if (fresh.length > 0) notify(yellow(blockedNotice(fresh)));
+	};
 	conversation.subscribe((next) => {
 		view = next;
+		tellBlocked();
 		render();
 		fillGaps();
 	});
@@ -244,6 +263,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		if (conversation.id !== before) {
 			rendered.clear();
 			style.clear();
+			told.clear();
 			// Each conversation's transcript has its own notices; the last one's go with it.
 			notices.length = 0;
 			lastIsStatus = false;
@@ -258,6 +278,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 					component: new Text(dim(`new conversation #${conversation.number}${forked}`), 1, 0),
 				});
 			}
+			// The daemon says what's blocked before its reply, so before the clearing above.
+			tellBlocked();
 		}
 		forkedFrom = undefined;
 		// The view can arrive before the reply that carries the number.
@@ -515,7 +537,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			tui.requestRender();
 			return { consume: true };
 		}
-		if (matchesKey(data, "escape") && busy()) {
+		if (matchesKey(data, "escape") && (busy() || stuck())) {
 			void client.request("abort", {}).catch(() => {});
 			return { consume: true };
 		}
@@ -558,7 +580,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	return code;
 }
 
-/** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported in 1.5.2). */
+/** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported). */
 /**
  * Fill the editor's Up-arrow history with a conversation's messages, oldest first, as pi
  * does when it opens a session (`populateHistory`), replacing the last conversation's.
@@ -589,7 +611,7 @@ function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 
 /**
  * The transcript scrolling above a dock that keeps the editor and the footer
- * in view, as pi's `createChatViewport` lays them out (not exported in 1.5.2).
+ * in view, as pi's `createChatViewport` lays them out (not exported).
  */
 export function chatLayout(
 	transcript: Component,
@@ -828,7 +850,7 @@ class OrphanResult implements Component {
 		this.#text = text;
 	}
 
-	render(width: number): string[] {
+	render(width: number): readonly string[] {
 		return this.#tools.has(this.#callId) ? [] : this.#text.render(width);
 	}
 
@@ -914,15 +936,63 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 	if (live.compactions !== undefined) components.push(new Text(dim("summarizing earlier messages…"), 1, 0));
 	if (live.run === undefined && live.runFailure !== undefined) {
 		const { reason, detail } = live.runFailure;
-		components.push(
-			new Text(red(`the run ended without an answer: ${reason}${detail ? ` (${String(detail)})` : ""}`), 1, 1),
-		);
+		// Orphaned: its blocked task was given up, and no code of it ran (`blockedNotice`).
+		const text =
+			reason === "orphaned"
+				? `the run was given up without its cleanup: its task couldn't run here${detail ? ` (${String(detail)})` : ""}`
+				: `the run ended without an answer: ${reason}${detail ? ` (${String(detail)})` : ""}`;
+		components.push(new Text(red(text), 1, 1));
 	}
 	for (const item of inbox?.items ?? []) {
 		const text = "content" in item && typeof item.content === "string" ? item.content : "";
 		if (text !== "") components.push(new Text(dim(`queued: ${text}`), 1, 0));
 	}
 	return components;
+}
+
+/**
+ * What Durable says of a blocked task, for a person: why it can't run, and what would run
+ * it. Durable's remedy is code that fits (spec section 5.4): the task waits, unchanged,
+ * and runs on once it's there. Aborting it is the way out that loses something.
+ */
+const BLOCKED_REASONS: Record<BlockedTask["reason"], { why: string; fix: string }> = {
+	missing_task: { why: "this pier doesn't have its code", fix: "a pier with the extension that defines it" },
+	task_too_old: { why: "a newer pier started it", fix: "that newer pier" },
+	migration_failed: {
+		why: "its saved state couldn't be brought up to date",
+		fix: "a pier whose code can bring it up to date",
+	},
+};
+
+/** The editor's border while ordinary tasks are blocked: short, as it shares the line. */
+export function blockedLine(tasks: readonly BlockedTask[]): string {
+	const first = tasks[0];
+	if (first === undefined) return "";
+	const why = tasks.length === 1 ? BLOCKED_REASONS[first.reason].why : `${tasks.length} tasks can't run`;
+	return `Blocked: ${why} · Esc gives it up`;
+}
+
+/**
+ * The transcript's line when tasks become blocked: what, why, what would run it, and that
+ * giving it up skips its cleanup (Durable orphans it: no code of the task runs).
+ */
+export function blockedNotice(tasks: readonly BlockedTask[]): string {
+	const lines = tasks.map((task) => {
+		const { why, fix } = BLOCKED_REASONS[task.reason];
+		const holds = task.background ? "It runs in the background, so the conversation goes on." : "";
+		return [
+			`${task.kind} (task ${task.id}) can't run here: ${why} (${task.reason}).`,
+			`It waits for ${fix}, and carries on there.`,
+			holds,
+		]
+			.filter((line) => line !== "")
+			.join(" ");
+	});
+	const ordinary = tasks.some((task) => !task.background);
+	const out = ordinary
+		? "Esc gives it up instead, without the cleanup its own code would do."
+		: "It holds nothing up, and Esc doesn't reach it; nothing in pier ends it yet.";
+	return `${lines.join("\n")}\n${out}`;
 }
 
 /** The footer's first words: what the client is doing, and which conversation. */

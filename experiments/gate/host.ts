@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { type AssistantMessage, cleanupSessionResources } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
 	AssistantEntry,
@@ -179,10 +179,9 @@ for (const step of steps) {
 	writeFileSync(statePath, JSON.stringify(conversations, null, "\t"));
 }
 await Promise.all([...watched.values()].map((stream) => stream.stop()));
-// Releases per-session provider state, such as the warm Claude Code process pi-claude-code
-// keeps for each conversation. pi does this when a session ends; Durable never does, and
-// without it that process outlives its 5-minute limit and keeps this one running.
-cleanupSessionResources();
+// Closing releases per-session provider state, such as the warm Claude Code process
+// pi-claude-code keeps for each conversation. Without it that process outlives its
+// 5-minute limit and keeps this one running: "every host exited by itself".
 await harness.close(context);
 
 async function run(step: Step, conversation: Conversation): Promise<Record<string, unknown>> {
