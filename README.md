@@ -31,6 +31,16 @@ messages stay above the editor until the run takes them in; the client's own lin
 ("new conversation #3", "compacting in the background", errors) go into
 the transcript, and scroll away with it.
 
+**Blocked.** When Durable can't run one of a conversation's tasks, it blocks the task,
+and the conversation waits for it: no installed code takes it (`missing_task`), a newer
+pier started it (`task_too_old`, after going back to an older pier), or its saved state
+couldn't be brought up to date (`migration_failed`). The client says so in the
+transcript, once, with why; the editor's border reads `⚠ Blocked: … · Esc ends it` in
+place of the working line, for as long as it lasts; `/resume`, `/tree` and `pier list`
+show the conversation as `blocked`; and the daemon logs it. Esc ends the task, and the
+conversation goes on. pier reads this from Durable's task graph, so it's shown whenever
+Durable blocks a task, not only at a daemon's start.
+
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:
 

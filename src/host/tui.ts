@@ -43,7 +43,7 @@ import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "./
 import { color, editorBorder } from "./colors.ts";
 import { asPicker, commandCompletions, openArguments } from "./commands.ts";
 import { Footer, footerState } from "./footer.ts";
-import { type AttachTarget, DAEMON_CLOSING, type ModelSummary } from "./protocol.ts";
+import { type AttachTarget, type BlockedTask, DAEMON_CLOSING, type ModelSummary } from "./protocol.ts";
 import { type Run, runEndingAt, runLine } from "./run-line.ts";
 import { startTheme } from "./theme.ts";
 import { installKeybindings, isDequeueKey, isExpandKey, isThinkingKey, ToolCalls } from "./tool-calls.ts";
@@ -177,6 +177,10 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const status = (line: string) => notify(dim(line), "status");
 	const live = () => (view?.docs["pi.live"] ?? {}) as LiveState;
 	const busy = () => live().run !== undefined;
+	/** Whether Durable can't run one of the conversation's tasks, so nothing goes on until it's ended. */
+	const stuck = () => conversation.blocked.length > 0;
+	/** The blocked tasks the transcript has already said, so each is said once. */
+	const told = new Set<number>();
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
 
 	/** The model's context window, asked of the daemon once per model; undefined until it answers. */
@@ -209,7 +213,13 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		}
 		fillTranscript(transcript, view, rendered, style, notices);
 		editor.borderColor = editorBorder((view.docs["pi.agent"] as AgentState | undefined)?.thinkingLevel);
-		working.update(busy() && client.connected);
+		working.update(
+			client.connected
+				? stuck()
+					? { kind: "blocked", message: blockedLine(conversation.blocked) }
+					: { kind: busy() ? "working" : "idle" }
+				: { kind: "idle" },
+		);
 		footer.update(footerState(view, windowOf(view)), statusText(conversation.number, client.connected));
 		tui.requestRender();
 		if (exitWhenIdle && !busy()) leaving?.(0);
@@ -230,8 +240,15 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				filling = false;
 			});
 	};
+	/** Say newly blocked tasks once in the transcript, with why and what to do; the border says it while it lasts. */
+	const tellBlocked = () => {
+		const fresh = conversation.blocked.filter((task) => !told.has(task.id));
+		for (const task of fresh) told.add(task.id);
+		if (fresh.length > 0) notify(yellow(blockedNotice(fresh)));
+	};
 	conversation.subscribe((next) => {
 		view = next;
+		tellBlocked();
 		render();
 		fillGaps();
 	});
@@ -244,6 +261,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		if (conversation.id !== before) {
 			rendered.clear();
 			style.clear();
+			told.clear();
 			// Each conversation's transcript has its own notices; the last one's go with it.
 			notices.length = 0;
 			lastIsStatus = false;
@@ -258,6 +276,8 @@ export async function runTui(options: TuiOptions): Promise<number> {
 					component: new Text(dim(`new conversation #${conversation.number}${forked}`), 1, 0),
 				});
 			}
+			// The daemon says what's blocked before its reply, so before the clearing above.
+			tellBlocked();
 		}
 		forkedFrom = undefined;
 		// The view can arrive before the reply that carries the number.
@@ -515,7 +535,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 			tui.requestRender();
 			return { consume: true };
 		}
-		if (matchesKey(data, "escape") && busy()) {
+		if (matchesKey(data, "escape") && (busy() || stuck())) {
 			void client.request("abort", {}).catch(() => {});
 			return { consume: true };
 		}
@@ -923,6 +943,29 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 		if (text !== "") components.push(new Text(dim(`queued: ${text}`), 1, 0));
 	}
 	return components;
+}
+
+/** What Durable says of a blocked task, for a person: why it can't run. */
+const BLOCKED_REASONS: Record<BlockedTask["reason"], string> = {
+	missing_task: "this pier doesn't have its code",
+	task_too_old: "a newer pier started it",
+	migration_failed: "its saved state couldn't be brought up to date",
+};
+
+/** The editor's border while a task is blocked: short, as it shares the line. */
+export function blockedLine(tasks: readonly BlockedTask[]): string {
+	const first = tasks[0];
+	if (first === undefined) return "";
+	const why = tasks.length === 1 ? BLOCKED_REASONS[first.reason] : `${tasks.length} tasks can't run`;
+	return `Blocked: ${why} · Esc ends it`;
+}
+
+/** The transcript's line when tasks become blocked: what, why, and what to do. */
+export function blockedNotice(tasks: readonly BlockedTask[]): string {
+	const lines = tasks.map(
+		(task) => `${task.kind} (task ${task.id}) can't run here: ${BLOCKED_REASONS[task.reason]} (${task.reason}).`,
+	);
+	return `${lines.join("\n")}\nIt waits until Esc ends it, or a pier that can run it opens this conversation.`;
 }
 
 /** The footer's first words: what the client is doing, and which conversation. */

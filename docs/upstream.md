@@ -28,6 +28,14 @@ Read from Durable 1.6.0's source and changelogs (a clone at `v1.6.0`), 2026-11-2
   until Esc ended its run (`orphaned`, `task_too_old`); then it ran again. A daemon
   stopped while idle leaves no such run. Minor releases have moved the others before
   (1.4.0 changed SQLite's schema).
+- **Blocked tasks.** Durable blocks a task no installed definition can take:
+  `missing_task`, `task_too_old`, `migration_failed`. It waits, holding its
+  conversation, until the registry changes or it's aborted; an abort orphans it, and
+  `Conversation.abort()` reaches it. The task graph (`harness.watchTaskGraph()`) gives
+  every live task's `blocked` reason, and follows the registry without a commit.
+  `onReport` says nothing of a task blocked at reservation; only a running task whose
+  definition goes (`task_outdated`) and a failed migration are reported. pier's daemon
+  watches the graph and tells clients (README, "Blocked").
 - **Watching is state, not events.** `Conversation.watch(context, window?)` gives
   `{ kind: "value", value, ops }`; `watchEvents()` and `viewState()` are gone. The
   view's `entries` are a window (the newest 50, at most 100), and

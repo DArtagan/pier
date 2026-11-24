@@ -19,7 +19,9 @@ import {
 	fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import {
+	type ConversationId,
 	createRegistry,
+	defineTask,
 	type EntryRecord,
 	Harness,
 	type LiveState,
@@ -615,6 +617,87 @@ describe("daemon", () => {
 			await daemon?.close();
 			daemon = undefined;
 			expect(released).toContain(sessionId);
+		});
+	});
+
+	// Durable blocks a task no installed definition can take: written by a newer Durable
+	// (`task_too_old`), or whose code is gone (`missing_task`). Its conversation waits for
+	// it, so the client must say so, and Esc must end it.
+	describe("blocked tasks", () => {
+		// Never installed in the daemon's registry, so Durable has no code for it.
+		const Uninstalled = defineTask<null, { phase: "run" }, null>({
+			name: "test.uninstalled",
+			version: 1,
+			initial: () => ({ phase: "run" }),
+			phases: { run: async () => {} },
+			abort: async () => {},
+		});
+		const blockIn = (id: ConversationId) =>
+			daemon?.harness.commit(
+				(tx) => tx.createTask(Uninstalled, null, { ownership: { kind: "conversation" }, conversationId: id }),
+				BACKGROUND_CONTEXT,
+			);
+
+		it("tells the attached client, says so in the list, and Esc ends it", async () => {
+			await start([]);
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			const id = conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			expect(conversation.blocked).toEqual([]);
+			const task = await blockIn(id);
+			await expect.poll(() => conversation.blocked.map((blocked) => blocked.id)).toEqual([task]);
+			expect(conversation.blocked[0]).toMatchObject({ kind: "test.uninstalled", reason: "missing_task" });
+			const listed = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(listed?.blocked).toBe(true);
+
+			await connected.request("abort", {});
+			await expect.poll(() => conversation.blocked).toEqual([]);
+			const after = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(after?.blocked).toBeUndefined();
+			const ended = await daemon?.harness.getTask(task as never, BACKGROUND_CONTEXT);
+			expect(ended?.state).toMatchObject({ status: "terminal", outcome: { status: "orphaned" } });
+		});
+
+		it("tells a client that attaches after the task was blocked, as at a daemon's start", async () => {
+			await start([]);
+			const first = await client();
+			await first.conversation.attach({ kind: "new" }, dir, {});
+			const id = first.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id);
+			await expect.poll(() => first.conversation.blocked.length).toBe(1);
+			await daemon?.close();
+
+			// The task is in the store; a new daemon finds it blocked as it opens.
+			const logged: string[] = [];
+			const models = createModels();
+			models.setProvider(faux.provider);
+			daemon = await startDaemon({
+				socketPath,
+				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
+				models,
+				model: { provider: "faux", modelId: "faux-1" },
+				extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+				log: (message) => logged.push(message),
+			});
+			expect(logged.some((line) => /blocked: missing_task/u.test(line))).toBe(true);
+			const again = await client();
+			await again.conversation.attach({ kind: "id", id }, dir, {});
+			await expect.poll(() => again.conversation.blocked.map((task) => task.reason)).toEqual(["missing_task"]);
+		});
+
+		it("doesn't tell a client attached to another conversation", async () => {
+			await start([]);
+			const stuck = await client();
+			await stuck.conversation.attach({ kind: "new" }, dir, {});
+			const other = await client();
+			await other.conversation.attach({ kind: "new" }, dir, {});
+			const id = stuck.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id);
+			await expect.poll(() => stuck.conversation.blocked.length).toBe(1);
+			expect(other.conversation.blocked).toEqual([]);
 		});
 	});
 

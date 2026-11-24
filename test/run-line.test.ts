@@ -8,6 +8,7 @@ import { getKeybindings } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatDuration, runEndingAt, runLine } from "../src/host/run-line.ts";
 import { installKeybindings } from "../src/host/tool-calls.ts";
+import { blockedLine, blockedNotice } from "../src/host/tui.ts";
 import { WorkingLine } from "../src/host/working.ts";
 
 let id = 0;
@@ -120,5 +121,37 @@ describe("working line", () => {
 		expect(top(shown)).toMatch(/^─+$/u);
 		// The spinner's timer is gone, or it would keep the client alive.
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("says a conversation is blocked in its place, still, over a run, and goes when it ends", () => {
+		const shown = editor();
+		const working = new WorkingLine(ui, shown);
+		const tasks = [{ id: 7 as never, kind: "pi.generation", reason: "task_too_old" as const }];
+		working.update(true);
+		working.update({ kind: "blocked", message: blockedLine(tasks) });
+		const line = top(shown);
+		expect(line).toMatch(/^── ⚠ Blocked: a newer pier started it · Esc ends it ─+$/u);
+		// Nothing moves: no spinner, no timer.
+		vi.advanceTimersByTime(200);
+		expect(top(shown)).toBe(line);
+		expect(vi.getTimerCount()).toBe(0);
+		working.update({ kind: "idle" });
+		expect(top(shown)).toMatch(/^─+$/u);
+	});
+
+	it("names each blocked task in the transcript, with why and what to do", () => {
+		const notice = blockedNotice([
+			{ id: 7 as never, kind: "pi.generation", reason: "task_too_old" },
+			{ id: 9 as never, kind: "pi.tool", reason: "missing_task" },
+		]);
+		expect(notice).toContain("pi.generation (task 7) can't run here: a newer pier started it (task_too_old).");
+		expect(notice).toContain("pi.tool (task 9) can't run here: this pier doesn't have its code (missing_task).");
+		expect(notice).toContain("Esc ends it");
+		expect(
+			blockedLine([
+				{ id: 7 as never, kind: "a", reason: "missing_task" },
+				{ id: 9 as never, kind: "b", reason: "missing_task" },
+			]),
+		).toBe("Blocked: 2 tasks can't run · Esc ends it");
 	});
 });

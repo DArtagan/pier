@@ -12,6 +12,7 @@ import {
 import { WebSocket } from "ws";
 import {
 	type AttachTarget,
+	type BlockedTask,
 	type Event,
 	type Method,
 	type Methods,
@@ -166,6 +167,7 @@ export class AttachedConversation {
 	#id: ConversationId | undefined;
 	#number: number | undefined;
 	#ended: string | undefined;
+	#blocked: readonly BlockedTask[] = [];
 
 	constructor(client: PierClient) {
 		this.#client = client;
@@ -190,6 +192,11 @@ export class AttachedConversation {
 	/** Why the daemon stopped sending this view, if it did. */
 	get ended(): string | undefined {
 		return this.#ended;
+	}
+
+	/** The conversation's tasks Durable can't run, as the daemon last said. */
+	get blocked(): readonly BlockedTask[] {
+		return this.#blocked;
 	}
 
 	async attach(target: AttachTarget, cwd: string, env: Record<string, string>): Promise<{ created: boolean }> {
@@ -268,6 +275,8 @@ export class AttachedConversation {
 				}
 				this.#id = event.conversation;
 				this.#view = event.view;
+				// The daemon sends them again after the view; until then, none are known.
+				this.#blocked = [];
 				break;
 			case "ops":
 				if (this.#view === undefined) return;
@@ -275,6 +284,9 @@ export class AttachedConversation {
 				break;
 			case "ended":
 				this.#ended = event.reason;
+				break;
+			case "blocked":
+				this.#blocked = event.tasks;
 				break;
 		}
 		if (this.#view !== undefined) this.#publish(this.#transcript.merge(this.#view));

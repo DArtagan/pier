@@ -175,7 +175,7 @@ export function commandCompletions(source: CommandSource): CombinedAutocompleteP
 				label: `#${summary.number}  ${oneLine(summary.title ?? "(empty)", 50)}`,
 				description: [
 					summary.number === current ? "current" : undefined,
-					summary.busy ? "working" : undefined,
+					activity(summary),
 					summary.cwd === source.cwd ? undefined : summary.cwd,
 				]
 					.filter((part) => part !== undefined)
@@ -229,7 +229,7 @@ export function treeDescription(summary: ConversationSummary, current: number, n
 	const own = summary.ownMessages;
 	return [
 		summary.number === current ? "current" : undefined,
-		summary.busy ? "working" : undefined,
+		activity(summary),
 		own === undefined || own < 2 ? undefined : `${own} messages`,
 		summary.latest !== undefined && summary.latest !== summary.branch && summary.latest !== summary.title
 			? `latest: ${oneLine(summary.latest, 40)}`
@@ -238,6 +238,12 @@ export function treeDescription(summary: ConversationSummary, current: number, n
 	]
 		.filter((part) => part !== undefined)
 		.join(" · ");
+}
+
+/** "blocked" when Durable can't run one of its tasks, which it wins over; "working" while a run goes. */
+export function activity(summary: ConversationSummary): string | undefined {
+	if (summary.blocked === true) return "blocked";
+	return summary.busy ? "working" : undefined;
 }
 
 /** "3m ago", "2h ago", "4d ago". */

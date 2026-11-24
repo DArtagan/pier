@@ -14,6 +14,7 @@ import type { Op } from "@earendil-works/chord/delta";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { ModelThinkingLevelSchema } from "@earendil-works/pi-ai/providers/model-schema";
 import type {
+	BlockedReason,
 	ConversationId,
 	ConversationView,
 	Cursor,
@@ -40,7 +41,7 @@ import {
 } from "@earendil-works/pi-schema";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 // Durable's ids are branded numbers.
 const conversationId = unsafe<ConversationId>(int({ minimum: 0 }));
@@ -138,6 +139,21 @@ export interface ConversationSummary {
 	readonly latest?: string;
 	/** When its newest message was sent, in ms since the epoch. */
 	readonly active?: number;
+	/** Whether Durable can't run one of its tasks (`BlockedTask`). */
+	readonly blocked?: boolean;
+}
+
+/**
+ * A task of the conversation that Durable can't run, as its task graph says, for as long
+ * as it says so: no installed definition takes it (`missing_task`), it was written by a
+ * newer Durable (`task_too_old`), or its saved state couldn't be migrated
+ * (`migration_failed`). It waits, and its conversation with it, until the registry
+ * changes or it's aborted.
+ */
+export interface BlockedTask {
+	readonly id: TaskId;
+	readonly kind: string;
+	readonly reason: BlockedReason;
 }
 
 /** A model the daemon can run, for the client's `/model` and `/thinking` pickers. */
@@ -210,7 +226,9 @@ export type Event =
 	/** The operations of the changes since, in order. */
 	| { event: "ops"; conversation: ConversationId; ops: readonly Op[] }
 	/** The view can't be followed any more (the daemon is closing, or its storage failed). */
-	| { event: "ended"; conversation: ConversationId; reason: string };
+	| { event: "ended"; conversation: ConversationId; reason: string }
+	/** The conversation's blocked tasks: after the view, and each time they change. */
+	| { event: "blocked"; conversation: ConversationId; tasks: readonly BlockedTask[] };
 
 export type ServerMessage = Response | Event;
 
