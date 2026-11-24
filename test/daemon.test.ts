@@ -21,6 +21,7 @@ import {
 import {
 	type ConversationId,
 	createRegistry,
+	defineExtension,
 	defineTask,
 	type EntryRecord,
 	Harness,
@@ -632,9 +633,14 @@ describe("daemon", () => {
 			phases: { run: async () => {} },
 			abort: async () => {},
 		});
-		const blockIn = (id: ConversationId) =>
+		const blockIn = (id: ConversationId, background = false) =>
 			daemon?.harness.commit(
-				(tx) => tx.createTask(Uninstalled, null, { ownership: { kind: "conversation" }, conversationId: id }),
+				(tx) =>
+					tx.createTask(Uninstalled, null, {
+						ownership: { kind: "conversation" },
+						conversationId: id,
+						...(background ? { background } : {}),
+					}),
 				BACKGROUND_CONTEXT,
 			);
 
@@ -647,7 +653,11 @@ describe("daemon", () => {
 			expect(conversation.blocked).toEqual([]);
 			const task = await blockIn(id);
 			await expect.poll(() => conversation.blocked.map((blocked) => blocked.id)).toEqual([task]);
-			expect(conversation.blocked[0]).toMatchObject({ kind: "test.uninstalled", reason: "missing_task" });
+			expect(conversation.blocked[0]).toMatchObject({
+				kind: "test.uninstalled",
+				reason: "missing_task",
+				background: false,
+			});
 			const listed = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
 			expect(listed?.blocked).toBe(true);
 
@@ -685,6 +695,58 @@ describe("daemon", () => {
 			const again = await client();
 			await again.conversation.attach({ kind: "id", id }, dir, {});
 			await expect.poll(() => again.conversation.blocked.map((task) => task.reason)).toEqual(["missing_task"]);
+		});
+
+		// Durable's remedy: the task waits, unchanged, and runs on once code that fits is there.
+		it("runs on, unblocked, once the daemon has the task's code", async () => {
+			await start([]);
+			const first = await client();
+			await first.conversation.attach({ kind: "new" }, dir, {});
+			const id = first.conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			const task = await blockIn(id);
+			await expect.poll(() => first.conversation.blocked.length).toBe(1);
+			await daemon?.close();
+
+			const Installed = defineTask<null, { phase: "run" }, null>({
+				name: "test.uninstalled",
+				version: 1,
+				initial: () => ({ phase: "run" }),
+				phases: {
+					run: (_task, runtime, ctx) =>
+						runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), ctx),
+				},
+				abort: async () => {},
+			});
+			const models = createModels();
+			models.setProvider(faux.provider);
+			daemon = await startDaemon({
+				socketPath,
+				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
+				models,
+				model: { provider: "faux", modelId: "faux-1" },
+				extensions: [
+					createPrompt({ agentDir: join(dir, "agent") }),
+					defineExtension({ name: "test.tasks", tasks: [Installed] }),
+				],
+			});
+			const again = await client();
+			await again.conversation.attach({ kind: "id", id }, dir, {});
+			const done = await daemon.harness.waitForTask(task as never, BACKGROUND_CONTEXT);
+			expect(done.state.outcome.status).toBe("completed");
+			await expect.poll(() => again.conversation.blocked).toEqual([]);
+		});
+
+		it("tells of a blocked background task, without marking the conversation blocked", async () => {
+			await start([]);
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, dir, {});
+			const id = conversation.id;
+			if (id === undefined) throw new Error("attached without an id");
+			await blockIn(id, true);
+			await expect.poll(() => conversation.blocked.map((task) => task.background)).toEqual([true]);
+			const listed = (await connected.request("list", {})).conversations.find((summary) => summary.id === id);
+			expect(listed?.blocked).toBeUndefined();
 		});
 
 		it("doesn't tell a client attached to another conversation", async () => {

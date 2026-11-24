@@ -28,14 +28,40 @@ Read from Durable 1.6.0's source and changelogs (a clone at `v1.6.0`), 2026-11-2
   until Esc ended its run (`orphaned`, `task_too_old`); then it ran again. A daemon
   stopped while idle leaves no such run. Minor releases have moved the others before
   (1.4.0 changed SQLite's schema).
-- **Blocked tasks.** Durable blocks a task no installed definition can take:
-  `missing_task`, `task_too_old`, `migration_failed`. It waits, holding its
-  conversation, until the registry changes or it's aborted; an abort orphans it, and
-  `Conversation.abort()` reaches it. The task graph (`harness.watchTaskGraph()`) gives
-  every live task's `blocked` reason, and follows the registry without a commit.
-  `onReport` says nothing of a task blocked at reservation; only a running task whose
-  definition goes (`task_outdated`) and a failed migration are reported. pier's daemon
-  watches the graph and tells clients (README, "Blocked").
+- **Blocked tasks** (spec section 5.4, read 2026-11-24). When a task is about to run,
+  Durable looks up its code by kind in the registry. Exactly three outcomes block it:
+  no definition (`missing_task`), a stored version newer than the code
+  (`task_too_old`), or an older one whose `migrate` throws (`migration_failed`). So a
+  task blocks whenever the code and the record disagree, which happens when:
+  - an extension defining a task kind is uninstalled, installed only after the
+    Harness opened, or moved between extensions (a gap between the two installs);
+  - a store is opened by an older Durable (the rollback, above);
+  - a newer Durable's migration fails on an older record.
+
+  An after-run task whose extension is gone blocks its run too. In pier today, whose
+  extensions define no tasks, only the last two can happen.
+- **What Durable means by it: never lose work over code.** "The Harness never
+  terminalizes a task merely because registry code is missing or incompatible,
+  neither at open nor later." A blocked task:
+  - keeps its record unchanged, and stays `pending`, `waiting` or `sleeping`;
+  - stays live, and an ordinary one still holds its conversation busy;
+  - is reconsidered whenever the registry changes, so installing code that fits
+    resumes it where it stopped. Blocked is derived, never stored;
+  - isn't active in `wake()`: only a registry change can let it run, so nothing need
+    poll it.
+
+  Ending one is the way out that loses something. Its abort handler can't run (that
+  code is what's missing), so an abort settles it `orphaned`, not `aborted`: "no task
+  code ran, so external effects the task started may remain uncleaned". Only an abort
+  orphans a task. `Conversation.abort()` reaches an ordinary blocked task (a run ends
+  `runFailure` `orphaned`, with the reason as `detail`); a background one needs
+  `abort({ background: true })` (checked 2026-11-24).
+- **How it's seen.** The task graph (`harness.watchTaskGraph()`) gives each live
+  task's `blocked` reason and `background` flag, and follows the registry without a
+  commit. `onReport` says nothing of a task blocked at reservation: it reports only a
+  failed migration (`migration_failed`, once) and a running task whose definition
+  goes (`task_outdated`). pier's daemon watches the graph and tells clients (README,
+  "Blocked").
 - **Watching is state, not events.** `Conversation.watch(context, window?)` gives
   `{ kind: "value", value, ops }`; `watchEvents()` and `viewState()` are gone. The
   view's `entries` are a window (the newest 50, at most 100), and

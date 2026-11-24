@@ -31,15 +31,22 @@ messages stay above the editor until the run takes them in; the client's own lin
 ("new conversation #3", "compacting in the background", errors) go into
 the transcript, and scroll away with it.
 
-**Blocked.** When Durable can't run one of a conversation's tasks, it blocks the task,
-and the conversation waits for it: no installed code takes it (`missing_task`), a newer
-pier started it (`task_too_old`, after going back to an older pier), or its saved state
-couldn't be brought up to date (`migration_failed`). The client says so in the
-transcript, once, with why; the editor's border reads `⚠ Blocked: … · Esc ends it` in
-place of the working line, for as long as it lasts; `/resume`, `/tree` and `pier list`
-show the conversation as `blocked`; and the daemon logs it. Esc ends the task, and the
-conversation goes on. pier reads this from Durable's task graph, so it's shown whenever
-Durable blocks a task, not only at a daemon's start.
+**Blocked.** When Durable has no code that fits one of a conversation's tasks, it
+blocks the task rather than ending it: no installed code takes it (`missing_task`), a
+newer pier started it (`task_too_old`, after going back to an older pier), or its saved
+state couldn't be brought up to date (`migration_failed`). The task waits, unchanged,
+and an ordinary one holds its conversation busy. Durable's remedy is the code that fits:
+run the pier (or install the extension) the task needs, and it carries on where it
+stopped. Esc gives it up instead, as Durable's "orphaned": none of the task's own code
+runs, so whatever cleanup it would have done is skipped.
+
+The client says so in the transcript, once: which task, why, what would run it, and
+what Esc costs. The editor's border reads `⚠ Blocked: … · Esc gives it up` in place of
+the working line while it lasts; `/resume`, `/tree` and `pier list` show the
+conversation as `blocked`; and the daemon logs it. A blocked background task holds
+nothing up and Esc doesn't reach it, so only the transcript and the log tell of it.
+pier reads all this from Durable's task graph, so it shows whenever Durable blocks a
+task, not only at a daemon's start.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:

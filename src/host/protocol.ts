@@ -139,7 +139,7 @@ export interface ConversationSummary {
 	readonly latest?: string;
 	/** When its newest message was sent, in ms since the epoch. */
 	readonly active?: number;
-	/** Whether Durable can't run one of its tasks (`BlockedTask`). */
+	/** Whether Durable can't run one of its ordinary tasks, so the conversation waits for it (`BlockedTask`). */
 	readonly blocked?: boolean;
 }
 
@@ -147,13 +147,16 @@ export interface ConversationSummary {
  * A task of the conversation that Durable can't run, as its task graph says, for as long
  * as it says so: no installed definition takes it (`missing_task`), it was written by a
  * newer Durable (`task_too_old`), or its saved state couldn't be migrated
- * (`migration_failed`). It waits, and its conversation with it, until the registry
- * changes or it's aborted.
+ * (`migration_failed`). Durable never ends it for that: it waits, unchanged, until code
+ * that fits is installed, or it's aborted, which orphans it without its cleanup (spec
+ * section 5.4). An ordinary one holds its conversation busy, and the conversation's abort
+ * reaches it; a `background` one does neither.
  */
 export interface BlockedTask {
 	readonly id: TaskId;
 	readonly kind: string;
 	readonly reason: BlockedReason;
+	readonly background: boolean;
 }
 
 /** A model the daemon can run, for the client's `/model` and `/thinking` pickers. */

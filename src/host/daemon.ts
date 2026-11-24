@@ -290,7 +290,7 @@ class BlockedTasks {
 		for (const node of Object.values(graph.tasks)) {
 			if (node.blocked === undefined) continue;
 			const tasks = next.get(node.conversationId) ?? [];
-			tasks.push({ id: node.id, kind: node.kind, reason: node.blocked });
+			tasks.push({ id: node.id, kind: node.kind, reason: node.blocked, background: node.background });
 			next.set(node.conversationId, tasks);
 		}
 		const changed = new Set([...this.#by.keys(), ...next.keys()]);
@@ -309,7 +309,10 @@ class BlockedTasks {
 		const ids = new Set(before.map((task) => task.id));
 		for (const task of after) {
 			if (!ids.has(task.id)) {
-				this.#log(`task ${task.id} (${task.kind}) of conversation ${conversation} is blocked: ${task.reason}`);
+				const background = task.background ? "background " : "";
+				this.#log(
+					`${background}task ${task.id} (${task.kind}) of conversation ${conversation} is blocked: ${task.reason}`,
+				);
 			}
 		}
 		const still = new Set(after.map((task) => task.id));
@@ -538,7 +541,8 @@ class ConversationAccess {
 				...(agent?.cwd === undefined ? {} : { cwd: agent.cwd }),
 				...(text === undefined ? {} : { title: text.replace(/\s+/gu, " ").slice(0, 80) }),
 				busy: live?.run !== undefined,
-				...(this.blocked.of(record.id).length === 0 ? {} : { blocked: true }),
+				// A blocked background task doesn't hold the conversation, so it isn't stuck.
+				...(this.blocked.of(record.id).some((task) => !task.background) ? { blocked: true } : {}),
 				activity: Number(newest?.id ?? record.id),
 			});
 		}
@@ -620,7 +624,7 @@ class Connection {
 			case "dequeue":
 				return { texts: await this.#conversations.dequeue(this.#conversation()) };
 			case "abort":
-				// It ends a blocked task too: Durable orphans an aborted task it can't run.
+				// It ends an ordinary blocked task too: Durable orphans an aborted task it can't run.
 				await this.#conversation().abort(context);
 				return {};
 			case "compact":

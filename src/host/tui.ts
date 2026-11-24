@@ -178,7 +178,9 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const live = () => (view?.docs["pi.live"] ?? {}) as LiveState;
 	const busy = () => live().run !== undefined;
 	/** Whether Durable can't run one of the conversation's tasks, so nothing goes on until it's ended. */
-	const stuck = () => conversation.blocked.length > 0;
+	// A blocked background task doesn't hold the conversation, and Esc doesn't reach it: it's
+	// told in the transcript, not the border.
+	const stuck = () => conversation.blocked.some((task) => !task.background);
 	/** The blocked tasks the transcript has already said, so each is said once. */
 	const told = new Set<number>();
 	const errorText = (error: unknown) => String(error instanceof Error ? error.message : error);
@@ -216,7 +218,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 		working.update(
 			client.connected
 				? stuck()
-					? { kind: "blocked", message: blockedLine(conversation.blocked) }
+					? { kind: "blocked", message: blockedLine(conversation.blocked.filter((task) => !task.background)) }
 					: { kind: busy() ? "working" : "idle" }
 				: { kind: "idle" },
 		);
@@ -934,9 +936,12 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 	if (live.compactions !== undefined) components.push(new Text(dim("summarizing earlier messages…"), 1, 0));
 	if (live.run === undefined && live.runFailure !== undefined) {
 		const { reason, detail } = live.runFailure;
-		components.push(
-			new Text(red(`the run ended without an answer: ${reason}${detail ? ` (${String(detail)})` : ""}`), 1, 1),
-		);
+		// Orphaned: its blocked task was given up, and no code of it ran (`blockedNotice`).
+		const text =
+			reason === "orphaned"
+				? `the run was given up without its cleanup: its task couldn't run here${detail ? ` (${String(detail)})` : ""}`
+				: `the run ended without an answer: ${reason}${detail ? ` (${String(detail)})` : ""}`;
+		components.push(new Text(red(text), 1, 1));
 	}
 	for (const item of inbox?.items ?? []) {
 		const text = "content" in item && typeof item.content === "string" ? item.content : "";
@@ -945,27 +950,49 @@ function renderLive(live: LiveState, inbox: InboxState | undefined, style: Trans
 	return components;
 }
 
-/** What Durable says of a blocked task, for a person: why it can't run. */
-const BLOCKED_REASONS: Record<BlockedTask["reason"], string> = {
-	missing_task: "this pier doesn't have its code",
-	task_too_old: "a newer pier started it",
-	migration_failed: "its saved state couldn't be brought up to date",
+/**
+ * What Durable says of a blocked task, for a person: why it can't run, and what would run
+ * it. Durable's remedy is code that fits (spec section 5.4): the task waits, unchanged,
+ * and runs on once it's there. Aborting it is the way out that loses something.
+ */
+const BLOCKED_REASONS: Record<BlockedTask["reason"], { why: string; fix: string }> = {
+	missing_task: { why: "this pier doesn't have its code", fix: "a pier with the extension that defines it" },
+	task_too_old: { why: "a newer pier started it", fix: "that newer pier" },
+	migration_failed: {
+		why: "its saved state couldn't be brought up to date",
+		fix: "a pier whose code can bring it up to date",
+	},
 };
 
-/** The editor's border while a task is blocked: short, as it shares the line. */
+/** The editor's border while ordinary tasks are blocked: short, as it shares the line. */
 export function blockedLine(tasks: readonly BlockedTask[]): string {
 	const first = tasks[0];
 	if (first === undefined) return "";
-	const why = tasks.length === 1 ? BLOCKED_REASONS[first.reason] : `${tasks.length} tasks can't run`;
-	return `Blocked: ${why} · Esc ends it`;
+	const why = tasks.length === 1 ? BLOCKED_REASONS[first.reason].why : `${tasks.length} tasks can't run`;
+	return `Blocked: ${why} · Esc gives it up`;
 }
 
-/** The transcript's line when tasks become blocked: what, why, and what to do. */
+/**
+ * The transcript's line when tasks become blocked: what, why, what would run it, and that
+ * giving it up skips its cleanup (Durable orphans it: no code of the task runs).
+ */
 export function blockedNotice(tasks: readonly BlockedTask[]): string {
-	const lines = tasks.map(
-		(task) => `${task.kind} (task ${task.id}) can't run here: ${BLOCKED_REASONS[task.reason]} (${task.reason}).`,
-	);
-	return `${lines.join("\n")}\nIt waits until Esc ends it, or a pier that can run it opens this conversation.`;
+	const lines = tasks.map((task) => {
+		const { why, fix } = BLOCKED_REASONS[task.reason];
+		const holds = task.background ? "It runs in the background, so the conversation goes on." : "";
+		return [
+			`${task.kind} (task ${task.id}) can't run here: ${why} (${task.reason}).`,
+			`It waits for ${fix}, and carries on there.`,
+			holds,
+		]
+			.filter((line) => line !== "")
+			.join(" ");
+	});
+	const ordinary = tasks.some((task) => !task.background);
+	const out = ordinary
+		? "Esc gives it up instead, without the cleanup its own code would do."
+		: "It holds nothing up, and Esc doesn't reach it; nothing in pier ends it yet.";
+	return `${lines.join("\n")}\n${out}`;
 }
 
 /** The footer's first words: what the client is doing, and which conversation. */

@@ -126,11 +126,11 @@ describe("working line", () => {
 	it("says a conversation is blocked in its place, still, over a run, and goes when it ends", () => {
 		const shown = editor();
 		const working = new WorkingLine(ui, shown);
-		const tasks = [{ id: 7 as never, kind: "pi.generation", reason: "task_too_old" as const }];
+		const tasks = [{ id: 7 as never, kind: "pi.generation", reason: "task_too_old" as const, background: false }];
 		working.update(true);
 		working.update({ kind: "blocked", message: blockedLine(tasks) });
 		const line = top(shown);
-		expect(line).toMatch(/^── ⚠ Blocked: a newer pier started it · Esc ends it ─+$/u);
+		expect(line).toMatch(/^── ⚠ Blocked: a newer pier started it · Esc gives it up ─+$/u);
 		// Nothing moves: no spinner, no timer.
 		vi.advanceTimersByTime(200);
 		expect(top(shown)).toBe(line);
@@ -139,19 +139,29 @@ describe("working line", () => {
 		expect(top(shown)).toMatch(/^─+$/u);
 	});
 
-	it("names each blocked task in the transcript, with why and what to do", () => {
+	// Durable's remedy is the code that fits; giving a task up orphans it, without its cleanup.
+	it("names each blocked task in the transcript: why, what would run it, and what Esc costs", () => {
 		const notice = blockedNotice([
-			{ id: 7 as never, kind: "pi.generation", reason: "task_too_old" },
-			{ id: 9 as never, kind: "pi.tool", reason: "missing_task" },
+			{ id: 7 as never, kind: "pi.generation", reason: "task_too_old", background: false },
+			{ id: 9 as never, kind: "pi.tool", reason: "missing_task", background: false },
 		]);
 		expect(notice).toContain("pi.generation (task 7) can't run here: a newer pier started it (task_too_old).");
+		expect(notice).toContain("It waits for that newer pier, and carries on there.");
 		expect(notice).toContain("pi.tool (task 9) can't run here: this pier doesn't have its code (missing_task).");
-		expect(notice).toContain("Esc ends it");
+		expect(notice).toContain("It waits for a pier with the extension that defines it");
+		expect(notice).toContain("Esc gives it up instead, without the cleanup its own code would do.");
 		expect(
 			blockedLine([
-				{ id: 7 as never, kind: "a", reason: "missing_task" },
-				{ id: 9 as never, kind: "b", reason: "missing_task" },
+				{ id: 7 as never, kind: "a", reason: "missing_task", background: false },
+				{ id: 9 as never, kind: "b", reason: "missing_task", background: false },
 			]),
-		).toBe("Blocked: 2 tasks can't run · Esc ends it");
+		).toBe("Blocked: 2 tasks can't run · Esc gives it up");
+	});
+
+	it("says a blocked background task holds nothing up, and isn't Esc's to end", () => {
+		const notice = blockedNotice([{ id: 9 as never, kind: "pi.compaction", reason: "missing_task", background: true }]);
+		expect(notice).toContain("It runs in the background, so the conversation goes on.");
+		expect(notice).toContain("Esc doesn't reach it");
+		expect(notice).not.toContain("Esc gives it up");
 	});
 });
