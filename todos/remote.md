@@ -73,6 +73,18 @@ Will, 2026-11-17:
 - **Directory and environment** (Will, 2026-11-18): *"We need to have a longer
   conversation about directory and environment next - after we've figured out these
   other details."*
+- **Rethinking the whole environment** (Will, 2026-11-24): *"Passing through the pane's
+  whole environment might not be the best plan after all. Please research and report on
+  some alternative options."* And: *"A good place to start might be by explicitly
+  defining what the parts of an "environment" are (e.g. working directory, environment
+  variables, etc.). That will form a formal interface contract, and anything not in that
+  contract should be isolated away/disallowed. After doing that, we can determine how
+  each component in the interface contract is provided."* This reopens his 2026-10-29
+  decision (*"keep it simple by passing through the whole environment. We can refine it
+  later."*), for local panes too. See `todos/environment.md`.
+- **The worktree and PR** (Will, 2026-11-24): *"Please put it in a worktree of its own
+  and start pushing that branch to GitHub. And please open a PR, to give me an optional
+  interface whereby to review the work."* Branch `remote`, draft PR #22.
 
 ## Findings
 
@@ -397,6 +409,11 @@ Proposals are Claude's, until Will agrees.
 
    And **which attaches change it**: every attach (today), only the one that creates a
    conversation, or only local ones.
+
+   Superseded as a question by Will's request of 2026-11-24: the environment is defined
+   as a contract first, then each part's source is chosen, for local and remote
+   conversations alike. That's `todos/environment.md`, which this spec waits on. The
+   directory stays here.
 5. **Version skew** (decided: hard refusal). Hosts switch separately, and `keep-old`
    leaves a daemon on its old version. The equality check stays; the refusal names both
    sides' pier versions (added to `hello`), and nothing more. Compatibility across
@@ -415,7 +432,9 @@ Proposals are Claude's, until Will agrees.
 
 ## Open questions for Will
 
-1. Directory and environment (component 4), the longer conversation Will asked for.
+1. The environment: `todos/environment.md`'s questions, first.
+2. The directory of a conversation started remotely: `--cwd` and a menu of the
+   remote's recent directories, with or without mapping relative to home (component 4)?
 
 ## Plan
 

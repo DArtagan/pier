@@ -29,7 +29,12 @@ its workaround. On hold by Will's decision on 2026-11-24, until pier has settled
 **[remote.md](remote.md) — reaching another host's conversations over SSH**
 Decided by Will from 2026-11-17: remote attach, both directions, SSH run by each client
 (`pier proxy`), starting conversations on another pier, `pier connect` remembering piers
-that name themselves. Directory and environment are still being worked out.
+that name themselves. Waits on `environment.md`; the directory is still open.
+
+**[environment.md](environment.md) — the environment contract: what a conversation's tools run with**
+Asked for by Will on 2026-11-24: define an environment's parts as a contract, keep
+everything else from tools, then choose each part's source. Reopens passing a pane's
+whole environment (2026-10-29), for local panes too. Proposals and open questions.
 
 ## Writing a spec
 
