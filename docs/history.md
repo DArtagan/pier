@@ -252,6 +252,20 @@ Then the spec was closed (Will, 2026-11-17: *"any additional changes I can make 
 need arises. If what is already in this spec is complete, then we can consider it
 complete"*).
 
+**Kept over pi-tui's own, by Will's decision** (2026-11-24), when the update to pi 1.6.0
+weighed removing them:
+
+- **The menu's nudges** (`asPicker`, `openArguments`). pi-tui opens a command's
+  argument menu when its space is typed, but not after Tab completes the command, nor
+  for a bare `/thinking`; and Enter on an argument fills the editor, needing a second
+  Enter. Will: Tab is *"genuinely worse"* without pier's, and the single Enter is
+  *"smoother and can stay (for now)"*, unless menus come to offer more than one
+  option to choose from.
+- **The history across sessions** (`fillHistory`). Without it Up recalls only what
+  the client typed since it started, or, filled without being cleared, every
+  conversation's at once. Will: *"I like that history can span sessions, it seems
+  like very useful functionality. And I sure wouldn't want it to span conversations."*
+
 ## Skills
 
 Will, 2026-11-17: *"We need to implement some system for pier to use skills -

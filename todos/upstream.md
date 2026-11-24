@@ -75,7 +75,8 @@ upstream, pier drops the workaround and the entry here goes.
   `history` when the client switches conversations (the editor can only add to it),
   and calls `tryTriggerAutocomplete()` to open a command's argument menu.
 - **pier's workaround.** `fillHistory` in `src/host/tui.ts`, and `openArguments` in
-  `src/host/commands.ts`. A pi-tui release that renames either breaks them silently;
-  the tests in `test/commands.test.ts` would catch it.
+  `src/host/commands.ts`, both kept by Will's decision (`docs/history.md`). A pi-tui
+  release that renames either member would break them without a type error; a test in
+  `test/commands.test.ts` fails if it does (checked by renaming each).
 - **The change.** A public `setHistory(entries)` (or `clearHistory()`) on the editor,
   and a public way to open the menu, as typing does.
