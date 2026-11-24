@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/DArtagan/pier/compare/v0.6.0...v0.7.0) (2026-11-24)
+
+
+### Features
+
+* run on pi 1.6.0, letting Durable release provider resources when the daemon closes ([20e3270](https://github.com/DArtagan/pier/commit/20e32701a1c521b5d4a75abe76cf9b9437fd58d4))
+* **tui:** show when Durable has blocked a conversation's task: why, what would run it, and that Esc gives it up ([20e3270](https://github.com/DArtagan/pier/commit/20e32701a1c521b5d4a75abe76cf9b9437fd58d4))
+
 ## [0.6.0](https://github.com/DArtagan/pier/compare/v0.5.0...v0.6.0) (2026-11-17)
 
 
