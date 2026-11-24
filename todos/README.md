@@ -26,6 +26,11 @@ The gaps pier works around (an idle release in Durable, pi's theme exports, a wo
 directory in pi-claude-code, pi-tui's private members), each with what would replace
 its workaround. On hold by Will's decision on 2026-11-24, until pier has settled.
 
+**[remote.md](remote.md) — reaching another host's conversations over SSH**
+Decided by Will from 2026-11-17: remote attach, both directions, SSH run by each client
+(`pier proxy`), starting conversations on another pier, `pier connect` remembering piers
+that name themselves. Directory and environment are still being worked out.
+
 ## Writing a spec
 
 Every spec's work happens within `docs/principles.md`; a spec that needs to step
