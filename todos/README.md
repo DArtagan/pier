@@ -33,8 +33,9 @@ that name themselves. Waits on `environment.md`; the directory is still open.
 
 **[environment.md](environment.md) — the environment contract: what a conversation's tools run with**
 Asked for by Will on 2026-11-24: define an environment's parts as a contract, keep
-everything else from tools, then choose each part's source. Reopens passing a pane's
-whole environment (2026-10-29), for local panes too. Proposals and open questions.
+everything else from tools, then choose each part's source. Decided that day: panes stop
+passing their whole environment (reversing 2026-10-29), and an allowlist. The contract
+in four groups, checked by running on thenixbeast; proposals and open questions.
 
 ## Writing a spec
 
