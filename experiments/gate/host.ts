@@ -180,8 +180,8 @@ for (const step of steps) {
 }
 await Promise.all([...watched.values()].map((stream) => stream.stop()));
 // Closing releases per-session provider state, such as the warm Claude Code process
-// pi-claude-code keeps for each conversation (Durable 1.6.0 on). Without it that process
-// outlives its 5-minute limit and keeps this one running: "every host exited by itself".
+// pi-claude-code keeps for each conversation. Without it that process outlives its
+// 5-minute limit and keeps this one running: "every host exited by itself".
 await harness.close(context);
 
 async function run(step: Step, conversation: Conversation): Promise<Record<string, unknown>> {

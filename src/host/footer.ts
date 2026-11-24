@@ -125,7 +125,7 @@ export function footerState(view: TranscriptView, contextWindow: number | undefi
 	};
 }
 
-/** pi's `formatTokens` (not exported, 1.6.0). */
+/** pi's `formatTokens` (not exported). */
 export function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;

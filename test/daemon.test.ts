@@ -577,8 +577,8 @@ describe("daemon", () => {
 
 	// pi-claude-code keeps a warm Claude Code per conversation until pi-ai's
 	// `cleanupSessionResources()` names its provider session (README, "Claude, through
-	// Claude Code"). The daemon releases it once the conversation idles; Durable (1.6.0 on)
-	// releases every conversation's when the Harness closes.
+	// Claude Code"). The daemon releases it once the conversation idles; Durable releases
+	// every conversation's when the Harness closes.
 	describe("provider resources", () => {
 		const released: (string | undefined)[] = [];
 		let unregister: (() => void) | undefined;

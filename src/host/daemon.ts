@@ -155,9 +155,9 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	);
 
 	// Release a conversation's provider resources once it has been idle a while. Durable
-	// releases them only when the Harness closes (1.6.0), where pi does when a session
-	// ends (README, "Claude, through Claude Code"). Workaround: an idle release in Durable
-	// (it already has `settings.contextRetentionMs` for idle contexts) would replace this.
+	// releases them only when the Harness closes, where pi does when a session ends
+	// (README, "Claude, through Claude Code"). Workaround: an idle release in Durable (it
+	// already has `settings.contextRetentionMs` for idle contexts) would replace this.
 	const releaseAfterMs = options.releaseAfterMs ?? 5 * 60_000;
 	const releases = new Map<ConversationId, NodeJS.Timeout>();
 	const release = async (conversationId: ConversationId) => {

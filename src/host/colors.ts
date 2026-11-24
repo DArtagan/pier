@@ -1,8 +1,8 @@
 // pi's theme colors, for pier's own text: the footer, the run line, the editor's lines.
 // pi's components take them from its theme; pier's own text should too, so it matches
-// them and follows the terminal's colors (`theme.ts`). pi's `theme` isn't exported
-// (1.6.0), so this reads it from pi's `dist/` by path, as `theme.ts` reads its controller;
-// it's the same instance, as `initTheme()` keeps it on `globalThis`.
+// them and follows the terminal's colors (`theme.ts`). pi's `theme` isn't exported,
+// so this reads it from pi's `dist/` by path, as `theme.ts` reads its controller; it's
+// the same instance, as `initTheme()` keeps it on `globalThis`.
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";

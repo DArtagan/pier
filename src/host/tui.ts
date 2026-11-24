@@ -132,7 +132,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const editor = new CustomEditor(
 		tui,
 		{ borderColor: editorBorder(undefined), selectList: getSelectListTheme() },
-		// pi's app keymap class isn't exported (1.6.0); pi-tui's (with pier's additions,
+		// pi's app keymap class isn't exported; pi-tui's (with pier's additions,
 		// `installKeybindings`) answers the same `matches` the editor asks.
 		getKeybindings() as ConstructorParameters<typeof CustomEditor>[2],
 		{
@@ -558,7 +558,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	return code;
 }
 
-/** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported, 1.6.0). */
+/** The alternate screen, set up as pi's `createInteractiveTui` sets it up (not exported). */
 /**
  * Fill the editor's Up-arrow history with a conversation's messages, oldest first, as pi
  * does when it opens a session (`populateHistory`), replacing the last conversation's.
@@ -589,7 +589,7 @@ function fullscreen(terminal: Terminal, hardwareCursor: boolean): TuiAltScreen {
 
 /**
  * The transcript scrolling above a dock that keeps the editor and the footer
- * in view, as pi's `createChatViewport` lays them out (not exported, 1.6.0).
+ * in view, as pi's `createChatViewport` lays them out (not exported).
  */
 export function chatLayout(
 	transcript: Component,

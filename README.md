@@ -146,7 +146,7 @@ Things a host must know, all found by the gate:
   per conversation for straight continuations, and frees it when pi-ai's
   `cleanupSessionResources(sessionId)` is called with the conversation's provider
   session id. pi does that when a session ends. Durable does it only when the Harness
-  closes (1.6.0), so pier's daemon also does it once a conversation has idled for five
+  closes, so pier's daemon also does it once a conversation has idled for five
   minutes.
 - **Claude Code would run in the host's directory**, which it reports to the model as
   its working directory: pi-claude-code starts it in `process.cwd()`, and nothing in a
@@ -210,8 +210,6 @@ conversation can reach is the place to revisit this.
 pi's packages are pinned exactly in `package.json`, all to one release (1.6.0). Pi
 Durable is experimental, and breaking changes land in minor releases, so bump them
 together and deliberately, as `docs/updating.md` says.
-
-pier runs on Node 26, as p3 does (its decisions, 2026-11-18: "node 26+ all the way").
 
 pier doesn't follow the pi that nixpkgs ships (1.5.0 on 2026-11-12). Its packages come
 from its own lockfile, so nothing ties the two together. What pier shares with classic

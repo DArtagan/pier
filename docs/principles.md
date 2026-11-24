@@ -134,8 +134,6 @@ Each cost a failure to learn. Detail is in `AGENTS.md`; new work must respect th
 - **Process groups:** tools and Claude Code run detached, in process groups of their
   own. Only a control-group kill reaps them, so the service must keep
   `KillMode=control-group`.
-- **Provider resources:** Durable releases them only when the Harness closes (1.6.0);
-  the host calls `cleanupSessionResources()` when a conversation idles.
 - **IDs:** Durable's ids share one counter across all records. Never show them to
   people; pier numbers conversations itself.
 - **Directories:** Claude Code reports its own working directory to the model, so each

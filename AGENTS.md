@@ -6,8 +6,9 @@ Guidance for coding agents working in this repository.
 
 pier runs pi on Pi Durable (`@earendil-works/pi-durable`): one daemon per host owns
 every session, and clients attach to it. TypeScript on Node 26, run directly with
-Node's type stripping in development; `npm run build` compiles it for packaging. Claude is reached through Claude Code, with
-Earendil's pi-claude-code provider. See `README.md` for the layout.
+Node's type stripping in development; `npm run build` compiles it for packaging.
+Claude is reached through Claude Code, with Earendil's pi-claude-code provider. See
+`README.md` for the layout.
 
 **Read `docs/vision.md` and `docs/principles.md` first.** The vision says what pier is
 for; all work happens within the principles: keep pier thin, build so it carries over
@@ -64,17 +65,17 @@ shows exactly what changed, and fails loudly when its text doesn't match.
 - **An invocation's `AbortSignal` aborts when the invocation ends**, normally too
   (`scheduler.ts`, `#end`). Anything that outlives one task phase must not hold it.
   (The pi-claude-bridge shim, now removed, had to work around this.)
-- **Shown is not stored** (1.5). Streamed text, tool output and a tool's `running`
+- **Shown is not stored.** Streamed text, tool output and a tool's `running`
   status reach watches before storage, by up to `settings.progress.persistWithinMs`
   (1 s). A tool slot shows `running` before its intent is stored and the tool starts,
   so a crash then reruns the call. `observeCommits()` sees only stored commits.
 - **Tools run in process groups of their own** (`NodeExecutionEnv` spawns them
   detached), so killing the host's process group leaves them running; only a
   control-group kill reaps them.
-- **No event stream** (1.5): render `Conversation.watch()`, whose entries are a window,
+- **No event stream**: render `Conversation.watch()`, whose entries are a window,
   with `ConversationTranscript` for the rest of the history.
 - More of how Durable behaves (crash recovery, storage, the provider session id, tools'
-  environment) and what's waiting in its next release is in `docs/upstream.md`.
+  environment, suspendable work) is in `docs/upstream.md`.
 
 ## Working with pi-claude-code
 
@@ -86,9 +87,9 @@ shows exactly what changed, and fails loudly when its text doesn't match.
   (`claude auth login`). `PI_CLAUDE_CODE_ALLOW_USAGE_CREDITS` lets turns be billed to
   Extra Usage; without it they fail with a "Claude Code billing" error.
 - Call pi-ai's `cleanupSessionResources(sessionId)` when a conversation goes idle:
-  Durable does it only for every session at `harness.close()` (1.6.0), and a
-  conversation's warm Claude Code process otherwise lingers (one kept a gate host alive
-  for 40 minutes).
+  Durable does it only for every session at `harness.close()`, and a conversation's
+  warm Claude Code process otherwise lingers (one kept a gate host alive for 40
+  minutes).
 - It starts Claude Code in `process.cwd()`, and Claude Code reports that to the model as
   its working directory. pier wraps the provider so that, inside a request,
   `process.cwd()` is the conversation's directory, which `ConversationDirectories`
