@@ -52,6 +52,21 @@ His questions that day, answered below: how bound an environment is to a convers
 an LLM's shell (c), the line between the service and the daemon (d), what the contract
 leaves out (e), and where else base variables could come from (3).
 
+Will, later on 2026-11-24, on the second draft:
+
+- **The four groups** (Place, Variables, Credentials, Execution): *"Yes."*
+- **Changing directory:** *"Yes, we need a `/cd` command. A tool to do the same could be
+  very useful, but we may not want to grant it to every conversation - as it could let a
+  model/conversation change its own directory and effectively work-around the
+  environment constraints we've set up."*
+- **Base variables:** *"Login shell sounds good as a base."*
+- **Credentials:** *"I like your tiers. We can defer which specific machines & users
+  when it comes to implementatiton."* And *"Yes to a `GitHub` token made for agents."*
+- **Asked again**, answered below: why changing directory costs the prompt cache (b);
+  why parts are not yet covered (e); what "a project's `.env` names kept out unless
+  granted" means and how (c); whether a config file the daemon owns is best practice,
+  and in something more human-editable than JSON (d).
+
 ## Findings
 
 ### What changed upstream since 2026-11-18 (read 2026-11-24)
@@ -320,6 +335,48 @@ Loosely, by design in Durable, and tightly in what the model believes.
   `.envrc`, Nix or a grant reaches the next call without touching the conversation. The
   conversation stores only what someone chose: its directory, and later its grants.
 
+### Why changing directory costs the prompt cache (Will's follow-up)
+
+Anthropic's prompt cache matches a request's *prefix*: everything from the start of the
+request up to a cache breakpoint must be byte-identical to a request it saw before. The
+first byte that differs ends the match, and everything after it is read at full price
+and written to the cache again. What a directory change touches, from the code
+(pi-claude-code at `d5b5e04`, Durable 1.6.0, pier's layer):
+
+- **pier's own `cwd` section.** pier puts the directory in the prompt as a section
+  (`src/layer/prompt.ts`). Durable stores a changed section as a *new* system entry at
+  the point of the change, in the transcript's order (README, "System Prompt": "only what
+  changed is sent again"). So the earlier part of the conversation stays the same, and
+  the cache still matches up to the change. The cost is the new entry itself, a few
+  dozen tokens. That part is cheap.
+- **AGENTS.md and skills.** The same: if the new directory has different ones, the
+  changed sections are appended as new entries. A larger AGENTS.md is more tokens, still
+  only from the change onward.
+- **Claude Code's own environment block. This is the expensive one.** Claude Code tells
+  the model its working directory in a system message near the *start* of the request
+  (its "environment" message, with the date), not at the end. pi-claude-code records
+  that message from the first request of a conversation and replays it unchanged after,
+  so the prefix stays stable (`claude-cli.ts`, `deriveInitialSystemMessages` and
+  `rewriteInitialRequest`; ARCHITECTURE.md: it "restores their stable layout during
+  full-history replay"). It keeps the recorded copy as long as the conversation lasts.
+  - If the recorded message is kept, the cache survives, but the model is told the old
+    directory there, and the new one in pier's section. That's the disagreement pier's
+    `ConversationDirectories` exists to avoid.
+  - If it were replaced with the new directory, everything after the first system
+    messages, the whole conversation, would be a cache miss once: a full re-read at full
+    price, as after an hour idle.
+
+  What actually happens on a `cwd` change isn't checked: a new Claude Code process
+  starts (the `cwd` is in its fingerprint), and whether pi-claude-code then reuses the
+  recorded message (stale directory, cache kept) or records a new one (right directory,
+  cache lost) needs a run with real Claude, by hand or in the gate.
+
+So "costs the prompt cache" was too strong as stated. pier's own part costs a few tokens
+once; Claude Code's environment block either keeps a stale directory or costs one full
+re-read. The `/cd` command will need that checked, and probably a choice between the
+two; a fork (`/fork`) already pays the full re-read once, and was measured at 99.8%
+cached afterwards.
+
 ### b. Can a conversation change working directories?
 
 Yes, and Durable supports it: `Conversation.configure({ cwd })` changes `pi.agent` in one
@@ -348,6 +405,20 @@ directory, as now. Options for how it changes:
 Proposal: a now, as a small command; b if daily use asks (worktrees are the likely
 case). Either way the directory must exist on the place, and a remote pane's `/cd`
 names a path on the far machine.
+
+Decided (Will, 2026-11-24): `/cd` now. A tool, perhaps, but not for every conversation,
+since a model that moves itself could step outside its constraints. Ways to bound the
+tool, when it's taken up:
+
+- **Granted per conversation,** like a credential (Durable's per-conversation `tools`
+  in `pi.agent` already selects which tools a conversation has).
+- **Bounded to a root:** only within the directory the conversation started in, or its
+  repository and that repository's worktrees.
+- **Asking Will:** the tool parks until he approves in the TUI (Durable 1.6.0's tools
+  that park).
+
+The bound matters more once project variables and grants are per directory: moving is
+then also changing what the conversation may use.
 
 ### c. direnv and devenv for an LLM's shell
 
@@ -387,15 +458,65 @@ Proposal: a, with three changes the checks call for:
 - evaluate in the background when a conversation is created or a watched file changes,
   and tell the model in its prompt while the project's environment isn't ready, or
   wasn't allowed;
-- keep the names a project's `.env` defines out of a tool's variables unless they're
-  granted for that project ("Credentials, in tiers"). pier reads the names from the
-  `.env` file itself, as the check did.
+- keep a project's secrets out of a tool's variables unless granted (below).
 
-The last is a tension with the allowlist: a toolchain's variables are an open set
-(devenv exported 83 to 112 here), so they can't be listed in advance. The proposal
-trusts what direnv's toolchain sets, and lists only the secrets. The stricter
-alternative is an allowlist of patterns for project variables too (`PATH`, `DEVENV_*`,
-`NIX_*`, `PKG_CONFIG*`, `PYTHON*`, `CC`, …), widened as projects need. Will's call.
+**The problem this solves, in Will's vulcanus-proxmox** (checked 2026-11-24). Its
+`devenv.nix` has `dotenv.enable = true`, so entering the project loads its `.env` file
+into the shell. direnv's export there has 90 variables. 19 come from `.env`, among them
+`PROXMOX_API_PASSWORD`, `GMAIL_PASSWORD`, `PM_PASS`, `TF_VAR_proxmox_api_token_secret`,
+`TF_VAR_github_token` and `PUSHOVER_TOKEN`. The other 71 are the toolchain's: `PATH`,
+`CC`, `DEVENV_*`, `KUBECONFIG`, `PYTHONPATH`, … A tool that gets the project's variables
+gets the passwords too, and so does the model, the moment any command prints its
+environment. Those are tier 1 credentials ("Credentials, in tiers"), arriving by the
+back door.
+
+**Why not an allowlist of every project variable.** The allowlist (decided) works for
+base variables: there are about twenty, the same everywhere, and they can be listed
+once. A project's toolchain isn't like that: devenv exported 83 variables for pier,
+90 for vulcanus-proxmox, different in each project, and they change when `devenv.nix`
+does (a new language adds its own: `GOPATH`, `CARGO_HOME`, `JAVA_HOME`). Listing them
+in advance means a tool breaks whenever a project adds one, until Will widens the list.
+That's what "an open set" meant.
+
+**What's proposed instead: tell the two kinds apart by where they come from.**
+
+- **The toolchain's variables pass:** what devenv's Nix shell sets (`PATH`, `CC`,
+  `DEVENV_*`, `PYTHONPATH`, …). They're written in `devenv.nix`, in the repository, and
+  aren't secret.
+- **The `.env` file's variables are held back:** pier reads the names defined in the
+  project's `.env` (the file devenv's `dotenv` loads) and removes those names from what
+  direnv exported, unless pier's configuration grants them for that project. Values
+  aren't read; only the names, as the check did. A grant names the project and the
+  variables:
+
+  ```yaml
+  projects:
+    ~/repositories/vulcanus-proxmox:
+      grant: [KUBECONFIG, TALOSCONFIG, TF_VAR_proxmox_api_url]
+  ```
+
+- So the allowlist still holds for secrets, where it matters: nothing from `.env`
+  reaches a tool without being named. It's relaxed only for the toolchain, which is
+  code Will reviewed in `devenv.nix`.
+
+What "each project's `.env` names allowed per project" meant in tier 1 is that `grant`
+list.
+
+**Its limits.** It catches secrets in `.env` only. A secret set directly in
+`devenv.nix` (`env.FOO = "secret"`), or by a line in `.envrc`, passes as toolchain.
+Will's convention keeps secrets in `.env` (gitignored) and SOPS, so that's the common
+case; the others are a project's own mistake, since `devenv.nix` is committed.
+
+**The alternatives:**
+
+- **An allowlist of patterns for all project variables** (`PATH`, `DEVENV_*`, `NIX_*`,
+  `PKG_CONFIG*`, `PYTHON*`, `CC`, …), widened by hand. Strictest; breaks a tool whenever
+  a project adds a variable outside the patterns.
+- **Turning `dotenv` off for agents:** evaluate the project with devenv's `dotenv`
+  disabled, so `.env` is never loaded. Exact, but devenv-specific, and needs devenv's own
+  evaluation (option b above) rather than direnv's.
+- **A denylist by name** (`*PASSWORD*`, `*TOKEN*`, `*SECRET*`, as Codex), already
+  rejected: it would miss `PM_PASS` and `PUSHOVER_USER_KEY`.
 
 The interface is "a source of project variables for a directory", so b or f can stand
 beside it later. On a machine without Nix, direnv alone still covers projects with an
@@ -417,11 +538,42 @@ its environment.
 
 Proposal, to draw the line:
 
-- **The daemon owns its configuration**, in a file of its own:
-  `$XDG_CONFIG_HOME/pier/config.json` (or TOML), read at start. It holds the model, the
-  skills directories, agent settings, credential grants, the base
-  variables' list, and the timeout. Environment variables (`PIER_*`) stay as overrides.
-  The daemon logs what it read, as it does `PIER_SKILLS` now.
+- **The daemon owns its configuration**, in a file of its own,
+  `$XDG_CONFIG_HOME/pier/config.yaml`, read at start. It holds the model, the skills
+  directories, agent settings, credential grants, project grants, the base variables'
+  list, and the timeout. Environment variables (`PIER_*`) stay as overrides. The daemon
+  logs what it read, as it does `PIER_SKILLS` now.
+
+**Is that best practice?** (Will's follow-up, 2026-11-24.) Yes, it's the common pattern
+for a daemon run by a service manager:
+
+- **A file in `$XDG_CONFIG_HOME/<app>/`**, per the XDG base directory spec, is how user
+  programs on Linux keep configuration, and what home-manager writes for nearly every
+  program it configures (Will's `~/.config` has `gh/config.yml`, `starship.toml`,
+  `alacritty/alacritty.toml`, `tmux/tmux.conf`, `ketch/`, `todoist-cli/`).
+- **The service unit carries only supervision**, and at most a path to the config file
+  and a few overrides. Configuration with structure (lists of projects and grants)
+  doesn't fit in `Environment=` lines. The docker daemon (`daemon.json`), syncthing
+  (`config.xml`) and atuin (`config.toml`) work this way. From general knowledge, not
+  re-read for this spec.
+- **Environment variables as overrides** follow the twelve-factor convention, and suit
+  tests and one-off runs (`PIER_MODEL=… pier daemon`).
+- Read at start, as now. Reloading on change (`SIGHUP`, or watching the file) can come
+  later, since a restart interrupts runs (`X-SwitchMethod=keep-old`).
+
+**Which format.** All three are common; each has a catch:
+
+| | For | Against |
+|---|---|---|
+| **JSON** | No dependency; pi's `settings.json` and p2's `settings.json` use it | No comments; strict commas and quotes; tiresome by hand |
+| **YAML** | Comments; reads well for nested lists (projects, grants); pier already has the `yaml` package in its tree, through pi-coding-agent's frontmatter parser (2.9.0, checked 2026-11-24); `gh` and Kubernetes use it | Indentation matters; surprising implicit types (`no` as false, `1.10` as a number); several dialects |
+| **TOML** | Comments; no indentation rules; explicit types; Rust's and Python's tools, Alacritty and Starship use it | A dependency (`smol-toml`); deeply nested tables are clumsier; less familiar for lists of records |
+
+Proposal: YAML, as Will suggested. It's the most readable for the nested shape here
+(projects with grants, credentials in tiers), the parser is already in the tree, and
+Nix writes it with `pkgs.formats.yaml`. The implicit-types trap is closed by validating
+the parsed file against a schema (pier already uses `pi-schema` for its protocol) and
+refusing to start on a mismatch, as the daemon already refuses a model it can't run.
 - **The service manager owns only supervision:** start at login, restart on failure,
   kill the control group, don't restart on switch. A systemd unit on Linux, launchd on
   macOS later, or a foreground `pier daemon` anywhere.
@@ -438,6 +590,35 @@ Proposal, to draw the line:
 
 It's host code, thrown away with the daemon when p3 takes over (`docs/vision.md`), but
 the module and the config file are what carry over as "Will's Nix module".
+
+### Why some parts aren't covered yet (Will's follow-up)
+
+Each for its own reason; none is an oversight, and each could be taken up on its own.
+
+- **Reach** (files, network, processes, devices): enforcing it means a sandbox, and a
+  sandbox is a project of its own, with its own choice (a user namespace with `bwrap`,
+  systemd's per-unit sandboxing, Gondolin VMs) and costs (what breaks when `~/.ssh` or
+  `/run/user` isn't there, how tools get at the Nix store and the network). It's the
+  "more isolated run environments" Will named on 2026-11-17 as a later step. The
+  contract names it so that step has a place.
+- **Claude Code's own environment:** it's the provider's process, not a tool's. Claude
+  Code only talks to the model in pier; Durable runs the tools. Its environment carries
+  Claude Code's login, which it needs. It could get its own allowlist later, but that's
+  a change to how the provider runs, apart from the tools' contract.
+- **Background processes a tool starts:** Durable starts each command in a process
+  group of its own and stops tracking it when the call returns. What it left running
+  keeps the environment it started with, and only the service's control-group kill ends
+  it (a constraint pier already lives with, `AGENTS.md`). Covering them means tracking
+  them per conversation, which nothing does yet.
+- **Umask, ownership and resource limits beyond a timeout:** they're the daemon's
+  process's, inherited by every tool, and they've caused no trouble. A limit per
+  conversation would need cgroups per call (`systemd-run --scope`), the same machinery as
+  reach.
+- **What pier's own extensions read** (AGENTS.md, skills): the daemon reads them from the
+  conversation's directory, not through a tool. They follow the place, as the contract
+  wants, but they aren't tool calls, so the contract's variables don't apply to them.
+- **Time zone and locale beyond the login profile:** nothing has needed them. The login
+  shell's `LANG`, `LC_*` and `TZDIR` are passed; `TZ` isn't set on these hosts.
 
 ### e. What the contract leaves out
 
@@ -583,21 +764,18 @@ The Variables and Credentials groups stay the same under any of them.
 
 ## Open questions for Will
 
-1. **The groups:** Place, Variables, Credentials, Execution. Do they fit how you think of
-   it?
-2. **Changing directory (b):** `/cd` from a pane now, a tool for the model later?
-3. **Project variables (c):** direnv evaluated by the daemon, diffed against the login
-   environment, cached, with a project's `.env` names kept out unless granted? Or an
-   allowlist of patterns for project variables too? Or another of the options?
-4. **The service and the daemon (d):** a config file the daemon owns, Nix writing it,
-   and the unit doing only supervision?
-5. **Base variables (3):** the login shell, probed, with pinned values from the config
-   file?
-6. **Credentials:** an agent-only SSH key for the machines agents may reach (tier 2a),
-   and no root, with Will running `nh os switch` himself (tier 3a and d)? Which machines,
-   and as which users, should an agent key reach?
-7. **Tier 1:** a GitHub token made for agents, and a project's `.env` passed only by the
-   names allowed for that project?
+1. **Project variables (c):** the toolchain's pass, a project's `.env` names are held
+   back unless granted in pier's configuration? Or an allowlist of patterns for all of
+   them, or turning devenv's `dotenv` off for agents?
+2. **The configuration (d):** `~/.config/pier/config.yaml`, owned by the daemon,
+   validated against a schema, written by Nix on Will's hosts and by hand elsewhere,
+   with the unit doing only supervision?
+3. **`/cd` and the prompt cache:** when the directory changes, should Claude Code's
+   environment block keep the old directory (cache kept) or take the new one (one full
+   re-read)? To be measured with real Claude before choosing.
+
+Deferred to implementation (Will, 2026-11-24): which machines and users an agent's SSH
+key reaches.
 
 ## Done when
 
