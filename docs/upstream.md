@@ -13,11 +13,21 @@ Read from Durable 1.6.0's source and changelogs (a clone at `v1.6.0`), 2026-11-2
   compaction. The coding agent (`pi`) doesn't use it, and pi 1.2.0 removed the
   unreleased first-party server and client. Marked experimental: "The API changes
   without notice between releases."
-- **A store doesn't go back.** Documents carry versions, and a Harness can't read
-  versions newer than its own: `pi.live` is at 3, `pi.tool` at 4 and `pi.generation` at
-  3. A store a newer pier has written isn't meant to be opened by an older one, so roll
-  back pier's code, not its store. Minor releases have moved them before (1.4.0
-  changed SQLite's schema; 1.5.0 had about two dozen breaking changes).
+- **Going back to an older Durable.** Three versions guard a store, each refusing
+  what's newer than its code:
+  - SQLite's schema (`durable_schema`, 2 in 1.5.2 and 1.6.0): an older Durable won't
+    open the store at all.
+  - A document's version (`pi.live` 3, `pi.agent` 1, …; pier's own are 1): reading a
+    newer one throws.
+  - A task's version (`pi.tool` 4 and `pi.generation` 3 in 1.6.0, 3 and 2 in 1.5.2): an
+    older Harness leaves a newer task `blocked`, `task_too_old`.
+
+  Going from 1.6.0 back to 1.5.2 meets only the last (tried 2026-11-24, on a copy).
+  pier at 1.5.2 opened a store 1.6.0 had written, listed every conversation, and ran
+  new messages. A conversation 1.6.0 left mid-run showed busy, with nothing reported,
+  until Esc ended its run (`orphaned`, `task_too_old`); then it ran again. A daemon
+  stopped while idle leaves no such run. Minor releases have moved the others before
+  (1.4.0 changed SQLite's schema).
 - **Watching is state, not events.** `Conversation.watch(context, window?)` gives
   `{ kind: "value", value, ops }`; `watchEvents()` and `viewState()` are gone. The
   view's `entries` are a window (the newest 50, at most 100), and
