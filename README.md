@@ -45,8 +45,6 @@ what Esc costs. The editor's border reads `⚠ Blocked: … · Esc gives it up` 
 the working line while it lasts; `/resume`, `/tree` and `pier list` show the
 conversation as `blocked`; and the daemon logs it. A blocked background task holds
 nothing up and Esc doesn't reach it, so only the transcript and the log tell of it.
-pier reads all this from Durable's task graph, so it shows whenever Durable blocks a
-task, not only at a daemon's start.
 
 Typing `/` opens pi's menu of commands, which more letters filter; a command's
 argument is picked from a menu of its own, with the arrows and Enter:
