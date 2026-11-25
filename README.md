@@ -130,15 +130,18 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
   where the model works (`run.ts`, `act.ts`, `model.ts`).
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
-- `todos/` holds specs for work not yet done.
-- `docs/vision.md` says what pier is for, and how it changes as p3 does.
-- `docs/principles.md` holds the principles all work on pier keeps to.
-- `docs/releasing.md` says how release-please makes versions.
-- `docs/updating.md` says how to move pier to a new pi release, and its dependencies
-  with it.
-- `docs/history.md` records Will's decisions, the gate's findings and the wrong turns.
-- `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
-  going, as last read.
+- `todos/` holds specs for work not yet done, each with the evidence it rests on beside
+  it (`<name>.evidence.md`); `todos/README.md` says how they're written.
+- `docs/` describes pier as it is now; `docs/README.md` lists what's there:
+  - `docs/vision.md` says what pier is for, and how it changes as p3 does.
+  - `docs/principles.md` holds the principles all work on pier keeps to.
+  - `docs/releasing.md` says how release-please makes versions.
+  - `docs/updating.md` says how to move pier to a new pi release, and its dependencies
+    with it.
+  - `docs/history.md` records Will's decisions, the gate's findings and the wrong
+    turns.
+  - `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
+    going, as last read.
 
 ## Commands
 

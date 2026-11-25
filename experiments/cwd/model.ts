@@ -1,7 +1,7 @@
 // Whether Claude Code's recorded environment message, which also names the model, goes
 // stale when a conversation's model changes (`/model`), as it does for the directory.
 // Two turns: one on Opus, then one on Sonnet, each asking what the environment says.
-// todos/environment.md, "How Claude Code's environment block is made".
+// todos/environment.evidence.md, "How Claude Code's environment block is made".
 //   node experiments/cwd/model.ts
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";

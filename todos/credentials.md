@@ -2,8 +2,8 @@
 
 ## Opening prompt
 
-> Read `docs/principles.md`, `todos/environment.md` (the contract's Credentials group,
-> and "Credentials, in tiers"), then `todos/credentials.md`. Will asked for the
+> Read `docs/principles.md`, `todos/environment.md` (the contract's Credentials group),
+> then `todos/credentials.md`. Will asked for the
 > principles of a credentials system before its design. Put the principles below to him
 > one by one, and record what he keeps, changes or drops, verbatim and dated. Don't
 > design the implementation until he's settled them. Then take "Design questions" in
@@ -15,7 +15,7 @@ Written 2026-11-24, at Will's request: *"What matters more then is designing a g
 controls. In this conceiving, one should define the principles behind the Credentials
 system before then designing the implementation."*
 
-It follows from his axiom of the same day (`todos/environment.md`, question c): a
+It follows from his axiom of the same day (`todos/environment.md`, "Decided"): a
 conversation pointed at a project may see that project's `.env`. That's the floor. This
 system is how a project, or Will's own credentials, get more control than that.
 
@@ -23,7 +23,8 @@ Everything below is Claude's proposal until Will agrees, except what's marked de
 
 ## Decided already
 
-- **Tiers** (Will, 2026-11-24: *"I like your tiers"*), from `todos/environment.md`:
+- **Tiers** (Will, 2026-11-24: *"I like your tiers"*), proposed in
+  `todos/environment.evidence.md` ("Credentials, in tiers"):
   0 none; 1 project and tools; 2 infrastructure (SSH to other machines); 3 root on this
   machine.
 - **A GitHub token made for agents** (Will, 2026-11-24: *"Yes to a `GitHub` token made
@@ -72,7 +73,7 @@ that doesn't need a password typed.
   bridged, the key stays on the server) and `server-only`. Workers get only their
   session's providers' tokens, and the server refreshes them.
 - **Claude Code's subprocess scrub** and **Codex's environment policy**
-  (`todos/environment.md`, Prior art): both filter variables by name; both say this isn't
+  (`todos/environment.evidence.md`, "Prior art"): both filter variables by name; both say this isn't
   a boundary.
 - **OpenSSH's agent** can constrain a key: a lifetime (`ssh-add -t`), the hosts it may be
   used for (`ssh-add -h`, 8.9 and later), and confirmation before each use (`ssh-add -c`,
@@ -146,7 +147,7 @@ Each with why. The design must keep all of them, or say which it bends and why.
    answer "which conversations could have used this?" and rotate the right things.
 
 9. **Leaks are expected, and limited.** The model is told which credentials its
-   environment holds, by name (`todos/environment.md`, "Telling the model"); tool
+   environment holds, by name (`todos/environment.md`, plan step 3); tool
    results are scrubbed of known values; a credential can be rotated without changing
    any grant (principle 1). *Why:* prompt injection and plain mistakes will happen;
    design for recovery, not for never.
@@ -157,7 +158,7 @@ Each with why. The design must keep all of them, or say which it bends and why.
     path, not a cutover.
 
 11. **Not a boundary until there is one.** While tools run as Will with no sandbox
-    (`todos/environment.md`, "Reach"), a determined process can read Will's files and
+    (`todos/environment.md`, "Variables aren't a boundary"), a determined process can read Will's files and
     sockets. The system makes the safe path the easy one, and records use; it doesn't
     claim to stop what it can't. *Why:* the same honesty as "filtering isn't
     isolation". Isolation, when it comes, makes principles 2 and 6 enforced.

@@ -71,8 +71,8 @@ upstream, pier drops the workaround and the entry here goes.
 
 ### pi-claude-code: a recorded environment block that goes stale
 
-Found 2026-11-24 (`todos/environment.md`, "How Claude Code's environment block is
-made, and kept"; `experiments/cwd/`).
+Found 2026-11-24 (`todos/environment.evidence.md`, "How Claude Code's environment block
+is made, and kept"; `experiments/cwd/`).
 
 - **The gap.** pi-claude-code records Claude Code's environment and date messages on a
   conversation's first request and replays them for the rest of the conversation, to

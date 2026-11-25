@@ -1,6 +1,6 @@
 // Where the model actually works after its conversation's directory changes, with real
-// Claude Code, under three ways of handling the change. todos/environment.md, "What /cd
-// does to the model". Per trial: a file written in directory alpha, the directory changed
+// Claude Code, under three ways of handling the change. todos/environment.evidence.md,
+// "What /cd does to the model". Per trial: a file written in directory alpha, the directory changed
 // to bravo, a file written "in the current project directory", then a question.
 //   node experiments/cwd/act.ts [trials per variant, default 3] [variant ...]
 // Variants: `bare` (configure({ cwd }) alone), `note` (and a note in Claude Code's own

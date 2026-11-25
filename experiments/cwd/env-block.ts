@@ -2,7 +2,7 @@
 // different directories, flags and variables, without reaching Anthropic: Claude Code's
 // API base points at a stub on loopback that keeps the request's body (never its
 // headers, which carry the login) and answers 400, so Claude Code stops. No tokens are
-// spent. todos/environment.md, "How Claude Code's environment block is made".
+// spent. todos/environment.evidence.md, "How Claude Code's environment block is made".
 //   node experiments/cwd/env-block.ts
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

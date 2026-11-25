@@ -1,8 +1,8 @@
 // What a conversation's change of directory (`/cd`, `configure({ cwd })`) does with real
 // Claude Code: which directory each part of the request names afterwards, and what it
 // costs the prompt cache. Four Opus turns, at low thinking: two in directory A, then the
-// change, then two in B. todos/environment.md, "Why changing directory costs the prompt
-// cache".
+// change, then two in B. todos/environment.evidence.md, "Why changing
+// directory costs the prompt cache".
 //   node experiments/cwd/run.ts
 // Leaves its state directory behind, with each turn's request bodies (no headers), and
 // prints its path.

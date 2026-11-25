@@ -150,8 +150,10 @@ Each cost a failure to learn. Detail is in `AGENTS.md`; new work must respect th
 - **Outward-facing actions need his OK each time:** pushing, pull requests,
   releases, upstream issues, anything published. An OK for one push isn't one for the
   next.
-- **Specs in `todos/`** carry verified context and an opening prompt, and are deleted
-  when their work lands. What stays true moves to `README.md`, `AGENTS.md` or `docs/`.
+- **Specs in `todos/`** carry the present plan, verified context and an opening prompt,
+  with the evidence behind them in a file beside each, and are deleted when their work
+  lands. What stays true moves to `README.md`, `AGENTS.md` or `docs/`, which describe
+  pier as it is (`todos/README.md`, `docs/README.md`).
 - **Commits are Conventional Commits**, each passing the hooks on its own.
   - When a hook rewrites files, stage them and make a fresh commit; never amend
     blindly.
