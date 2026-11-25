@@ -96,6 +96,22 @@ exposure" (principle 6) is now a product category, not only p2's idea.
 
 - **Secret stores, and handing values to tools** (design questions 1 and 2;
   principles 1, 7 and 12):
+  - [SecretSpec](https://secretspec.dev/) (added by Will, 2026-11-25): Cachix's, from
+    the devenv authors, and built into devenv. A project declares the secrets it needs
+    in `secretspec.toml` (names, descriptions, required or not, profiles); where each
+    value lives is chosen per user or per secret, from about 35 providers, among them
+    the keyring, `.env`, 1Password, SOPS, age, systemd credentials, Infisical and
+    Tailscale's [Setec](https://github.com/tailscale/setec). `secretspec run` gives a
+    command only its declared secrets, or a scope's subset (its docs: scopes "are not
+    an authorization boundary"); `as_path` gives a file instead of a value;
+    `secretspec init --from dotenv` and `import dotenv://.env` migrate a `.env`. 0.21
+    (2026-09-22) added a JSON-RPC protocol (`secretspec serve`) for a tool to ask a
+    resolver for one secret at a time, over stdio or SSH, and one for external
+    providers, which can return approval references for a local audit log. Checked on
+    thenixbeast 2026-11-25: `secretspec` 0.21.0 is installed, devenv is 2.4.0, nearly
+    every project in `~/repositories` has a `devenv.nix`, and reelbarrow already uses
+    SecretSpec (keyring provider, secrets given only through `secretspec run`, devenv's
+    loading off).
   - [SOPS](https://github.com/getsops/sops): an editor of encrypted files (YAML, JSON,
     ENV, INI, binary), with age, PGP or a cloud KMS; a CNCF sandbox project. Already in
     use (dotfiles, vulcanus-proxmox); see "What exists today".
@@ -104,7 +120,11 @@ exposure" (principle 6) is now a product category, not only p2's idea.
     `op run` (as variables, to one subprocess) or `op inject` (into a config file):
     principle 1's "by reference". Service accounts restrict the CLI to some vaults
     (principle 4); "Environments" (beta) pass a project's variables without
-    references, close to a `.env` migration (principle 10). Newer: a Credential
+    references, close to a `.env` migration (principle 10). An Environment can be
+    [mounted as a project's `.env`](https://www.1password.dev/environments/local-env-file)
+    (Linux and Mac): a named pipe, nothing on disk, and the first read prompts for
+    approval, but once approved *every* process can read it until 1Password locks, so
+    it doesn't tell pier's tools from Will's shell. Newer: a Credential
     Broker (public preview, Enterprise) that verifies a workload by OIDC and logs each
     delivery, starting with GitHub Actions; and "Privileged Access", just-in-time.
   - [Infisical](https://github.com/infisical/infisical): open source, self-hostable or
