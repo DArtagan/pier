@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect } from "node:net";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { dirname } from "node:path";
 import type { Context } from "@earendil-works/chord/context";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -34,9 +34,9 @@ import {
 	type TaskGraph,
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import { ConversationDirectories } from "../layer/claude-code.ts";
+import { type EnvironmentOptions, ToolEnvironment } from "../layer/environment.ts";
 import { createPrompt } from "../layer/prompt.ts";
 import { createSkills } from "../layer/skills.ts";
 import {
@@ -53,21 +53,6 @@ import {
 	type Request,
 	type Response,
 } from "./protocol.ts";
-
-/**
- * The environment of the client that last attached to a conversation. Its tools run with
- * it, so a pane's devenv PATH and SSH agent reach bash. Stored, so work Durable resumes
- * after a restart runs with it too; the storage is the daemon's, in a private directory.
- */
-export const ClientEnvDoc = defineDoc<{ vars: Record<string, string> }>({
-	kind: "pier.client-env",
-	version: 1,
-	scope: "conversation",
-	history: "latest",
-	fork: "current",
-	initial: () => ({ vars: {} }),
-	checkpointWhen: () => true,
-});
 
 /**
  * The numbers pier gives conversations, #1, #2, … on this host, by number. Durable's own
@@ -110,6 +95,11 @@ export interface DaemonOptions {
 	/** Installed after the coding tools; default pier's prompt, and projects' skills only. */
 	extensions?: readonly Extension[];
 	/**
+	 * What tool calls run with (`src/layer/environment.ts`), less the conversation's name,
+	 * which the daemon gives as `<host>#<number>`. `login` is the login shell's environment.
+	 */
+	environment: Omit<EnvironmentOptions, "name" | "log">;
+	/**
 	 * How long a conversation is idle before its provider's per-session resources (such
 	 * as pi-claude-code's warm Claude Code process) are released. Default 5 minutes.
 	 */
@@ -135,20 +125,31 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 	// Before any storage, so a second daemon gives up before it touches it.
 	await claimSocket(options.socketPath);
 	const registry = createRegistry();
-	registry.install(CodingTools);
+	// Durable's coding tools, with bash under the environment contract: a call gets only the
+	// contract's variables, never the daemon's or a pane's.
+	const host = hostname().split(".")[0] ?? "pier";
+	const environment = new ToolEnvironment({
+		...options.environment,
+		name: async (conversationId, read, nameContext) => {
+			const numbers = await read.snapshot(NumbersDoc, nameContext);
+			const found = Object.entries(numbers?.conversations ?? {}).find(([, id]) => id === conversationId);
+			return found === undefined ? undefined : `${host}#${found[0]}`;
+		},
+		log,
+	});
+	registry.install(environment.tools());
 	// pi-claude-code runs Claude Code in the directory this records for each conversation.
 	registry.install(ConversationDirectories);
 	for (const extension of options.extensions ?? [createPrompt(), createSkills()]) registry.install(extension);
+	registry.install(environment.section());
 
 	const harness = await Harness.open(
 		options.storage,
 		{
 			models: options.models,
 			registry,
-			env: async ({ conversationId, cwd, read }, envContext) => {
-				const vars = (await read.snapshot(ClientEnvDoc, conversationId, envContext))?.vars;
-				return new NodeExecutionEnv({ cwd: cwd ?? homedir(), ...(vars === undefined ? {} : { shellEnv: vars }) });
-			},
+			// No `shellEnv`: bash's calls get their variables from the contract (above).
+			env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? homedir() }),
 			// A bash call batched with a write or edit runs after it, not beside it.
 			settings: { toolExecution: "sequential" },
 			onReport: (report) => log(`report ${report.kind}: ${String(report.error)}`),
@@ -395,7 +396,6 @@ class ConversationAccess {
 			fork.from = conversation.id;
 			fork.before = before;
 		};
-		// The pane's environment comes with the client's attach, as for any conversation.
 		if (previous === undefined) {
 			const agent = await this.harness.snapshot(AgentDoc, conversation.id, context);
 			await this.harness.createConversation(
@@ -647,9 +647,6 @@ class Connection {
 		// Opened before the old view is let go, so a target that isn't there leaves it attached.
 		const { conversation, number, created } = await this.#conversations.open(params.target, params.cwd);
 		await this.detach();
-		await conversation.commit(async (tx) => {
-			(await tx.doc(ClientEnvDoc, conversation.id)).vars = { ...params.env };
-		}, context);
 		const watch = await conversation.watch(context, params.window);
 		const sendBlocked = () =>
 			this.#send({

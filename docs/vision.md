@@ -38,7 +38,8 @@ moving into p3, and Radius.
    to build it, and p3's docs don't mention Claude Code. It's the part meant to last:
    - Claude through his subscription;
    - NixOS packaging and systemd;
-   - the pane's environment (devenv, SSH) reaching the agent's tools;
+   - the environment the agent's tools run with: the login profile, each project's
+     devenv, his agent settings, and later his credentials;
    - his AGENTS.md, skills and tools (Todoist, Calendar through `gog`, ketch,
      mini-nas);
    - local-first data, and the tailnet.

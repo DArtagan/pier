@@ -102,7 +102,6 @@ export interface TuiOptions {
 	socketPath: string;
 	target: AttachTarget;
 	cwd: string;
-	env: Record<string, string>;
 }
 
 /** Run the client until the user leaves; resolves with the exit code. */
@@ -258,7 +257,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 	const attach = async (target: AttachTarget) => {
 		const before = conversation.id;
 		// Cleared only once it worked, so a failed /resume leaves the transcript as it was.
-		const { created } = await conversation.attach(target, options.cwd, options.env);
+		const { created } = await conversation.attach(target, options.cwd);
 		// Entry ids are unique across conversations, so this only frees the old one's.
 		if (conversation.id !== before) {
 			rendered.clear();
@@ -318,7 +317,7 @@ export async function runTui(options: TuiOptions): Promise<number> {
 				// biome-ignore lint/performance/noAwaitInLoops: a retry, each try after the last
 				const next = client.connected ? client : await connectWhenUp(options.socketPath, { signal: left.signal });
 				try {
-					await conversation.reattach(next, options.cwd, options.env);
+					await conversation.reattach(next, options.cwd);
 					client = next;
 					break;
 				} catch (error) {

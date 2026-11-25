@@ -9,6 +9,7 @@
 //   tools:
 //     variables: { GIT_CONFIG_GLOBAL: /home/will/.config/git/config-agent, PAGER: cat }
 //     timeout: 600                       # seconds, a bash call's when the model sets none
+//     projectWait: 60                    # seconds a call waits for the project's direnv
 //
 // Nix writes it on Will's hosts (`pkgs.formats.yaml`); elsewhere it's written by hand.
 import { readFile } from "node:fs/promises";
@@ -32,6 +33,11 @@ const ConfigSchema = obj({
 			variables: opt(map(str())),
 			/** A bash call's timeout in seconds, when the model gives none. */
 			timeout: opt(num({ exclusiveMinimum: 0 })),
+			/**
+			 * How long, in seconds, a bash call waits for its project's environment (direnv) to be
+			 * evaluated before it runs without it. Default 60; 0 doesn't wait.
+			 */
+			projectWait: opt(num({ minimum: 0 })),
 		}),
 	),
 });
@@ -94,5 +100,6 @@ export function describeConfig(config: Config): string {
 	const variables = Object.keys(config.tools?.variables ?? {});
 	if (variables.length > 0) parts.push(`tools.variables ${variables.join(" ")}`);
 	if (config.tools?.timeout !== undefined) parts.push(`tools.timeout ${config.tools.timeout}s`);
+	if (config.tools?.projectWait !== undefined) parts.push(`tools.projectWait ${config.tools.projectWait}s`);
 	return parts.length === 0 ? "(empty)" : parts.join(", ");
 }

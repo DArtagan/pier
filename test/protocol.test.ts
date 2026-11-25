@@ -9,11 +9,11 @@ const refused = (message: unknown, id: number, error: RegExp) =>
 describe("parseRequest", () => {
 	it("takes the requests the client sends", () => {
 		ok({ id: 1, method: "hello", params: { version: 5 } });
-		ok({ id: 2, method: "attach", params: { target: { kind: "continue" }, cwd: "/w", env: { PATH: "/bin" } } });
+		ok({ id: 2, method: "attach", params: { target: { kind: "continue" }, cwd: "/w" } });
 		ok({
 			id: 3,
 			method: "attach",
-			params: { target: { kind: "id", id: 47 }, cwd: "/w", env: {}, window: { from: 120, min: 50 } },
+			params: { target: { kind: "id", id: 47 }, cwd: "/w", window: { from: 120, min: 50 } },
 		});
 		ok({ id: 4, method: "submit", params: { text: "hi", whenBusy: "steer" } });
 		ok({
@@ -35,13 +35,14 @@ describe("parseRequest", () => {
 	});
 
 	it("refuses params of the wrong shape, saying where", () => {
-		refused({ id: 1, method: "attach", params: { target: { kind: "nearest" }, cwd: "/w", env: {} } }, 1, /\/target/u);
+		refused({ id: 1, method: "attach", params: { target: { kind: "nearest" }, cwd: "/w" } }, 1, /\/target/u);
+		// A client's environment no longer crosses: an older client that sends one is refused.
 		refused(
-			{ id: 2, method: "attach", params: { target: { kind: "new" }, cwd: "/w", env: { N: 1 } } },
+			{ id: 2, method: "attach", params: { target: { kind: "new" }, cwd: "/w", env: { PATH: "/bin" } } },
 			2,
-			/\/env\/N /u,
+			/\/env unknown field/u,
 		);
-		refused({ id: 3, method: "attach", params: { target: { kind: "new" }, env: {} } }, 3, /\/cwd missing/u);
+		refused({ id: 3, method: "attach", params: { target: { kind: "new" } } }, 3, /\/cwd missing/u);
 		refused({ id: 4, method: "fork", params: { before: "12" } }, 4, /^Bad params for fork: \/before /u);
 		refused({ id: 5, method: "entries", params: { limit: 0 } }, 5, /\/limit /u);
 		refused({ id: 6, method: "configure", params: { thinkingLevel: "extreme" } }, 6, /\/thinkingLevel /u);

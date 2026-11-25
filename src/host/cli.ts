@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { loadClaudeCodeProvider } from "../layer/claude-code.ts";
+import { BASE_VARIABLES, loginShell, probeLoginEnvironment } from "../layer/environment.ts";
 import { createPrompt } from "../layer/prompt.ts";
 import { createSkills } from "../layer/skills.ts";
 import { PierClient } from "./client.ts";
@@ -71,7 +72,6 @@ async function attachTui(target: AttachTarget, mode: TuiMode): Promise<number> {
 		socketPath: await reachable(),
 		target,
 		cwd: process.cwd(),
-		env: environment(),
 	});
 }
 
@@ -103,13 +103,6 @@ async function reachable(): Promise<string> {
 	}
 }
 
-/** This process's environment, as the tools of the conversation will see it. */
-function environment(): Record<string, string> {
-	return Object.fromEntries(
-		Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-	);
-}
-
 async function daemon(): Promise<number> {
 	const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
 	// Read first, so a mistake in any of them stops the daemon before it does anything.
@@ -124,6 +117,9 @@ async function daemon(): Promise<number> {
 	// and in this process's otherwise, telling the model about it, git status included. The
 	// state directory says nothing about any project.
 	process.chdir(state);
+	// The base of every tool call's variables: the login shell's, read once, as a new terminal gets them.
+	const shell = loginShell();
+	const login = await probeLoginEnvironment(shell);
 	const models = await ModelRuntime.create({ allowModelNetwork: false, refreshOnCreate: false });
 	models.registerNativeProvider(await loadClaudeCodeProvider());
 	const running = await startDaemon({
@@ -133,8 +129,18 @@ async function daemon(): Promise<number> {
 		model,
 		thinkingLevel,
 		extensions: [createPrompt(), createSkills({ paths: skills })],
+		environment: {
+			login,
+			...(config.tools?.variables === undefined ? {} : { settings: config.tools.variables }),
+			...(config.tools?.timeout === undefined ? {} : { timeoutSeconds: config.tools.timeout }),
+			...(config.tools?.projectWait === undefined ? {} : { projectWaitMs: config.tools.projectWait * 1000 }),
+		},
 		log,
 	});
+	const kept = Object.keys(login).filter((name) =>
+		BASE_VARIABLES.some((entry) => (typeof entry === "string" ? entry === name : entry.test(name))),
+	);
+	log(`tools' base: ${shell}'s login environment, ${kept.length} of ${Object.keys(login).length} variables kept`);
 	log(`config ${configFile}: ${describeConfig(config)}`);
 	log(`storage ${join(state, "pier.sqlite")}`);
 	log(`skills ${skills.length === 0 ? "(none beyond projects')" : skills.join(" ")}`);

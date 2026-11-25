@@ -4,9 +4,10 @@
 // variables. Run outside any terminal, so nothing comes from a pane:
 //   systemd-run --user --wait --pipe --quiet --collect -p WorkingDirectory=$HOME \
 //     "$(command -v node)" "$PWD/experiments/environment/contract-check.mjs" "$PWD" <project dir> ...
-// PIER_CHECK_TODAY=1 (with --setenv) runs it as pier is today, inheriting the daemon's
+// PIER_CHECK_TODAY=1 (with --setenv) runs it as pier 0.7.0 did, inheriting the daemon's
 // environment: the keep-out checks must then fail. Plain JavaScript, so it runs without
-// pier's devenv; written 2026-11-24, before the contract was built.
+// pier's devenv; written 2026-11-24, before the contract was built (src/layer/environment.ts),
+// and re-run against it on 2026-11-25: every check passed in pier, vulcanus-proxmox and dotfiles.
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";

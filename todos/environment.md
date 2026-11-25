@@ -70,6 +70,16 @@ Will, 2026-11-24, verbatim:
   when it comes to implementatiton."* *"Yes to a `GitHub` token made for agents."* The
   rest is `todos/credentials.md`.
 
+Will, 2026-11-25, verbatim, on step 2's open questions:
+
+- **Dotfiles writes the config:** asked whether Claude may change `modules/pi/pier.nix`
+  to write `config.yaml`, *"Please do."*
+- **A tool call before the project's environment is ready:** on waiting for direnv up
+  to a limit, then running without the project's variables, *"Yes, go with your
+  proposal - make the limit configurable."*
+- **`PIER_CONVERSATION`:** *"host#number is a good convention, go with that."* So
+  `thenixbeast#3`.
+
 ## The contract
 
 An environment is where and how a conversation's tools run. Every part has one source,
