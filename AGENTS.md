@@ -98,5 +98,9 @@ shows exactly what changed, and fails loudly when its text doesn't match.
 
 ## Specs
 
-`todos/` holds work not yet done: one spec per piece of work, with verified context and
-an opening prompt, deleted once the work lands. See `todos/README.md`.
+`todos/` holds work not yet done: one spec per piece of work, the present plan with
+verified context and an opening prompt, and beside it, if needed, the evidence it rests
+on (`<name>.evidence.md`). Both are deleted once the work lands. See `todos/README.md`.
+
+`docs/` describes pier as it is now, never what's planned; `docs/history.md` is the one
+file there that isn't present tense. See `docs/README.md`.

@@ -121,17 +121,27 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
 - `experiments/transcript/` measures the terminal client with a long transcript.
+- `experiments/environment/` runs tool commands as the environment contract would
+  (`todos/environment.md`), outside any terminal: what works, what's kept out
+  (`contract-check.mjs`), and what a tool can still reach as you (`authority-check.mjs`).
+- `experiments/cwd/` studies Claude Code's environment block: what it says under
+  different directories and flags, against a stub API (`env-block.ts`); and, with real
+  Claude, what a change of directory or model does to it, to the prompt cache, and to
+  where the model works (`run.ts`, `act.ts`, `model.ts`).
 - `test/` holds offline tests, with a faux model in place of Claude: the daemon and its
   clients over a real socket, the prompt, and the provider's loading.
-- `todos/` holds specs for work not yet done.
-- `docs/vision.md` says what pier is for, and how it changes as p3 does.
-- `docs/principles.md` holds the principles all work on pier keeps to.
-- `docs/releasing.md` says how release-please makes versions.
-- `docs/updating.md` says how to move pier to a new pi release, and its dependencies
-  with it.
-- `docs/history.md` records Will's decisions, the gate's findings and the wrong turns.
-- `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
-  going, as last read.
+- `todos/` holds specs for work not yet done, each with the evidence it rests on beside
+  it (`<name>.evidence.md`); `todos/README.md` says how they're written.
+- `docs/` describes pier as it is now; `docs/README.md` lists what's there:
+  - `docs/vision.md` says what pier is for, and how it changes as p3 does.
+  - `docs/principles.md` holds the principles all work on pier keeps to.
+  - `docs/releasing.md` says how release-please makes versions.
+  - `docs/updating.md` says how to move pier to a new pi release, and its dependencies
+    with it.
+  - `docs/history.md` records Will's decisions, the gate's findings and the wrong
+    turns.
+  - `docs/upstream.md` holds what pier relies on from Earendil, and where Earendil is
+    going, as last read.
 
 ## Commands
 

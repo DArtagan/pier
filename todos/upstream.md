@@ -69,6 +69,28 @@ upstream, pier drops the workaround and the entry here goes.
 - **Where.** `earendil-works/pi-claude-code`, which has had no commits since
   2026-11-05.
 
+### pi-claude-code: a recorded environment block that goes stale
+
+Found 2026-11-24 (`todos/environment.evidence.md`, "How Claude Code's environment block
+is made, and kept"; `experiments/cwd/`).
+
+- **The gap.** pi-claude-code records Claude Code's environment and date messages on a
+  conversation's first request and replays them for the rest of the conversation, to
+  keep the prompt cache warm. It records them afresh only when the model changes. So the
+  model is told the first day's date for as long as the conversation lasts (in Will's
+  store, 498 of 1,746 answers were given under a stale date; one conversation ran a
+  week on its first day's), and after a change of directory, the old directory.
+- **pier's workaround** (decided by Will, 2026-11-24; not built yet). pier adds Claude
+  Code's own `# Environment update` wording as a note when the directory or the day
+  changes (about 30 to 100 tokens, cache kept). The block itself stays stale. A tested
+  alternative, kept in reserve, strips the recording when the directory differs, at the
+  cost of one full cache write (`experiments/cwd/act.ts`, `refresh`); it depends on
+  pi-claude-code's private replay format.
+- **The change.** Either drop the recording when the `cwd` differs, as already done when
+  the model differs; or, cheaper, insert Claude Code's own `# Environment update`
+  message (directory, date) where the change happened, keeping the recorded prefix.
+- **Where.** `earendil-works/pi-claude-code`, with the working-directory gap above.
+
 ### pi-tui: the editor's history and menu, without private members
 
 - **The gap.** pier reaches two private members of pi-tui's `Editor`: it clears
