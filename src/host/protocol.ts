@@ -27,7 +27,6 @@ import {
 	compile,
 	int,
 	lit,
-	map,
 	obj,
 	oneOf,
 	opt,
@@ -41,7 +40,7 @@ import {
 } from "@earendil-works/pi-schema";
 
 /** Bumped whenever a message changes shape; a client and a daemon of different versions refuse each other. */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 // Durable's ids are branded numbers.
 const conversationId = unsafe<ConversationId>(int({ minimum: 0 }));
@@ -72,11 +71,12 @@ const ConversationWindow = obj({
 const Params = {
 	hello: obj({ version: int() }),
 	/**
-	 * Attach this connection to a conversation, replacing any earlier attachment. `env` is
-	 * the client's whole environment; the conversation's tools run with it from now on.
-	 * `window` resumes a transcript after a dropped connection (`ConversationTranscript.resume`).
+	 * Attach this connection to a conversation, replacing any earlier attachment. `cwd` is
+	 * the client's directory, for a new conversation or `continue`; nothing else of the
+	 * client's reaches the conversation's tools. `window` resumes a transcript after a
+	 * dropped connection (`ConversationTranscript.resume`).
 	 */
-	attach: obj({ target: AttachTarget, cwd: str({ minLength: 1 }), env: map(str()), window: opt(ConversationWindow) }),
+	attach: obj({ target: AttachTarget, cwd: str({ minLength: 1 }), window: opt(ConversationWindow) }),
 	detach: none,
 	/** Send input. While a run is going, `steer` joins it and `followUp` (the default) waits for it. */
 	submit: obj({ text: str(), whenBusy: opt(oneOf(["steer", "followUp"])) }),

@@ -1,9 +1,11 @@
+/** biome-ignore-all lint/suspicious/noTemplateCurlyInString: tool commands are shell, where ${NAME:-x} is shell's */
 // The daemon and its clients, over a real Unix socket, with a faux model in place of
-// Claude: attach, submit, watch, several clients, the client's environment, abort, a
-// restart, and reconnecting after one.
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+// Claude: attach, submit, watch, several clients, the environment tools run with, abort,
+// a restart, and reconnecting after one.
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
@@ -34,7 +36,13 @@ import { WebSocket, WebSocketServer } from "ws";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "../src/host/client.ts";
 import { type Daemon, startDaemon } from "../src/host/daemon.ts";
 import { PROTOCOL_VERSION } from "../src/host/protocol.ts";
+import { findExecutable, probeLoginEnvironment } from "../src/layer/environment.ts";
 import { createPrompt } from "../src/layer/prompt.ts";
+
+// The login shell's environment, probed once: the base of every tool call's variables.
+const login = await probeLoginEnvironment();
+// The direnv the daemon finds: the login shell's, else the test's (devenv's, in CI).
+const direnv = findExecutable("direnv", [login.PATH, process.env.PATH]) ?? "direnv";
 
 describe("daemon", () => {
 	let dir: string;
@@ -54,7 +62,11 @@ describe("daemon", () => {
 		await rm(dir, { recursive: true, force: true });
 	});
 
-	async function start(responses: FauxResponseStep[], releaseAfterMs?: number): Promise<void> {
+	async function start(
+		responses: FauxResponseStep[],
+		releaseAfterMs?: number,
+		environment: Partial<Parameters<typeof startDaemon>[0]["environment"]> = {},
+	): Promise<void> {
 		faux.setResponses(responses);
 		const models = createModels();
 		models.setProvider(faux.provider);
@@ -64,6 +76,7 @@ describe("daemon", () => {
 			models,
 			model: { provider: "faux", modelId: "faux-1" },
 			extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+			environment: { login, ...environment },
 			...(releaseAfterMs === undefined ? {} : { releaseAfterMs }),
 		});
 	}
@@ -115,32 +128,112 @@ describe("daemon", () => {
 	it("answers a client, and shows the run to another client on the same conversation", async () => {
 		await start([fauxAssistantMessage("Hello from faux")]);
 		const first = await client();
-		const { created } = await first.conversation.attach({ kind: "new" }, dir, {});
+		const { created } = await first.conversation.attach({ kind: "new" }, dir);
 		expect(created).toBe(true);
 		const id = first.conversation.id;
 		if (id === undefined) throw new Error("attached without an id");
 		const second = await client();
-		await second.conversation.attach({ kind: "id", id }, dir, {});
+		await second.conversation.attach({ kind: "id", id }, dir);
 		const seen = until(second.conversation, answered("Hello from faux"));
 		await first.client.request("submit", { text: "hi" });
 		await until(first.conversation, answered("Hello from faux"));
 		await seen;
 	});
 
-	it("runs tools with the environment of the client that attached", async () => {
-		await start([
-			fauxAssistantMessage(fauxToolCall("bash", { command: "echo marker:$PIER_TEST_VAR" }), { stopReason: "toolUse" }),
+	/** The output of the first tool call a conversation in `cwd` makes, running `command`. */
+	async function toolOutput(command: string, cwd = dir): Promise<string> {
+		faux.setResponses([
+			fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
 		]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, { ...process.env, PIER_TEST_VAR: "from-the-pane" } as Record<
-			string,
-			string
-		>);
+		await conversation.attach({ kind: "new" }, cwd);
 		await connected.request("submit", { text: "run it" });
 		const view = await until(conversation, answered("done"));
 		const result = entries(view).find((entry) => entry.kind === "pi.tool-result");
-		expect(JSON.stringify(result?.model)).toContain("marker:from-the-pane");
+		return JSON.stringify(result?.model);
+	}
+
+	// The environment contract (src/layer/environment.ts): a tool call gets the login shell's
+	// listed variables, the project's direnv export, pier's settings and its identity, and
+	// nothing of the daemon's process or of the pane that attached.
+	describe("the environment tools run with", () => {
+		afterEach(() => {
+			delete process.env.PIER_TEST_DAEMON_ONLY;
+		});
+
+		it("keeps out a variable set only in the daemon's process, and one a pane sends", async () => {
+			// The daemon's own: what a variable inherited from the service, or an older pier's pane, would be.
+			process.env.PIER_TEST_DAEMON_ONLY = "leaked";
+			await start([]);
+			const output = await toolOutput('echo "daemon:${PIER_TEST_DAEMON_ONLY:-absent} pane:${PIER_TEST_PANE:-absent}"');
+			expect(output).toContain("daemon:absent pane:absent");
+		});
+
+		it("refuses an attach that sends an environment, as an older client would", async () => {
+			await start([]);
+			const { client: connected } = await client();
+			await expect(
+				connected.request("attach", { target: { kind: "new" }, cwd: dir, env: { PIER_TEST_PANE: "x" } } as never),
+			).rejects.toThrow(/\/env unknown field/u);
+		});
+
+		it("gives the login shell's PATH and HOME, TERM=dumb, the settings, and the call's identity", async () => {
+			await start([], undefined, { settings: { PAGER: "cat", PIER_TEST_SETTING: "set" } });
+			const output = await toolOutput(
+				'echo "path:${PATH:+set} home:$HOME term:$TERM pager:$PAGER setting:$PIER_TEST_SETTING pier:$PIER conversation:$PIER_CONVERSATION"',
+			);
+			expect(output).toContain(
+				`path:set home:${login.HOME} term:dumb pager:cat setting:set pier:1 conversation:${hostname().split(".")[0]}#1`,
+			);
+		});
+
+		it("lets the settings stand in for a base variable", async () => {
+			await start([], undefined, { settings: { TERM: "xterm" } });
+			expect(await toolOutput("echo term:$TERM")).toContain("term:xterm");
+		});
+
+		it("adds the project's direnv export, once its .envrc is allowed", async () => {
+			// direnv keeps its allow list under XDG_DATA_HOME: the test's own, not the user's.
+			const sandboxed = { ...login, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config") };
+			const project = join(dir, "project");
+			await mkdir(project);
+			await writeFile(join(project, ".envrc"), "export PIER_TEST_PROJECT=from-envrc\n");
+			await start([], undefined, { login: sandboxed });
+
+			// Not allowed: no variable, and the model is told.
+			expect(await toolOutput('echo "project:${PIER_TEST_PROJECT:-absent}"', project)).toContain("project:absent");
+
+			const allowed = spawnSync(direnv, ["allow", project], { env: sandboxed, encoding: "utf8" });
+			expect(allowed.status, allowed.stderr).toBe(0);
+			// direnv's allow list is one of the files it watches: the next call evaluates again.
+			expect(await toolOutput('echo "project:${PIER_TEST_PROJECT:-absent}"', project)).toContain("project:from-envrc");
+		});
+
+		it("tells the model when the project's .envrc isn't allowed", async () => {
+			const sandboxed = { ...login, XDG_DATA_HOME: join(dir, "data"), XDG_CONFIG_HOME: join(dir, "config") };
+			const project = join(dir, "project");
+			await mkdir(project);
+			await writeFile(join(project, ".envrc"), "export PIER_TEST_PROJECT=from-envrc\n");
+			let prompt = "";
+			await start([], undefined, { login: sandboxed });
+			faux.setResponses([
+				(request: RequestContext) => {
+					prompt = JSON.stringify(request);
+					return fauxAssistantMessage("done");
+				},
+			]);
+			const { client: connected, conversation } = await client();
+			await conversation.attach({ kind: "new" }, project);
+			await connected.request("submit", { text: "hi" });
+			await until(conversation, answered("done"));
+			expect(prompt).toContain("hasn't been allowed");
+		});
+
+		it("gives a bash call the configured timeout when the model sets none", async () => {
+			await start([], undefined, { timeoutSeconds: 0.2 });
+			expect(await toolOutput("sleep 3; echo finished")).toMatch(/timed out after 0\.2 seconds/u);
+		});
 	});
 
 	it("runs a batch of tool calls one at a time, so a call sees what the call before it wrote", async () => {
@@ -158,7 +251,7 @@ describe("daemon", () => {
 			fauxAssistantMessage("done"),
 		]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await connected.request("submit", { text: "write, then read" });
 		const view = await until(conversation, answered("done"));
 		const results = entries(view)
@@ -172,15 +265,15 @@ describe("daemon", () => {
 	it("continues the newest conversation in a directory, and lists by directory", async () => {
 		await start([fauxAssistantMessage("one"), fauxAssistantMessage("two")]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		const first = conversation.id;
 		await connected.request("submit", { text: "first conversation" });
 		await until(conversation, answered("one"));
-		await conversation.attach({ kind: "new" }, join(dir, "elsewhere"), {});
+		await conversation.attach({ kind: "new" }, join(dir, "elsewhere"));
 		await connected.request("submit", { text: "second conversation" });
 		await until(conversation, answered("two"));
 
-		const { created } = await conversation.attach({ kind: "continue" }, dir, {});
+		const { created } = await conversation.attach({ kind: "continue" }, dir);
 		expect(created).toBe(false);
 		expect(conversation.id).toBe(first);
 		const { conversations } = await connected.request("list", { cwd: dir });
@@ -191,25 +284,25 @@ describe("daemon", () => {
 	it("numbers conversations 1, 2, 3, whatever ran in between, and opens them by number", async () => {
 		await start([fauxAssistantMessage("first answer"), fauxAssistantMessage("second answer")]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		expect(conversation.number).toBe(1);
 		const first = conversation.id;
 		// A turn takes a dozen of Durable's ids (entries, tasks, documents) between conversations.
 		await connected.request("submit", { text: "one" });
 		await until(conversation, answered("first answer"));
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		expect(conversation.number).toBe(2);
 		await connected.request("submit", { text: "two" });
 		await until(conversation, answered("second answer"));
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		expect(conversation.number).toBe(3);
 
-		await conversation.attach({ kind: "number", number: 1 }, dir, {});
+		await conversation.attach({ kind: "number", number: 1 }, dir);
 		expect(conversation.id).toBe(first);
 		await until(conversation, answered("first answer"));
 		const { conversations } = await connected.request("list", { cwd: dir });
 		expect(conversations.map((summary) => summary.number).sort()).toEqual([1, 2, 3]);
-		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(/No conversation #9/u);
+		await expect(conversation.attach({ kind: "number", number: 9 }, dir)).rejects.toThrow(/No conversation #9/u);
 	});
 
 	it("numbers the conversations of a store from before numbers, oldest first", async () => {
@@ -243,7 +336,7 @@ describe("daemon", () => {
 				}),
 		]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await connected.request("submit", { text: "wait" });
 		await until(conversation, (latest) => !idle(latest));
 		await connected.request("abort", {});
@@ -254,7 +347,7 @@ describe("daemon", () => {
 	it("keeps conversations across a restart", async () => {
 		await start([fauxAssistantMessage("remembered")]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		const id = conversation.id;
 		await connected.request("submit", { text: "remember this" });
 		await until(conversation, answered("remembered"));
@@ -262,7 +355,7 @@ describe("daemon", () => {
 
 		await start([]);
 		const again = await client();
-		await again.conversation.attach({ kind: "continue" }, dir, {});
+		await again.conversation.attach({ kind: "continue" }, dir);
 		expect(again.conversation.id).toBe(id);
 		await until(again.conversation, answered("remembered"));
 	});
@@ -270,7 +363,7 @@ describe("daemon", () => {
 	it("reattaches after the daemon restarts, getting what it missed without a gap", async () => {
 		await start([fauxAssistantMessage("before the restart")]);
 		const first = await client();
-		await first.conversation.attach({ kind: "new" }, dir, {});
+		await first.conversation.attach({ kind: "new" }, dir);
 		const id = first.conversation.id;
 		if (id === undefined) throw new Error("attached without an id");
 		await first.client.request("submit", { text: "one" });
@@ -284,13 +377,13 @@ describe("daemon", () => {
 		const reconnecting = connectWhenUp(socketPath, { firstDelayMs: 10, maxDelayMs: 50 });
 		await start([fauxAssistantMessage("while it was away")]);
 		const other = await client();
-		await other.conversation.attach({ kind: "id", id }, dir, {});
+		await other.conversation.attach({ kind: "id", id }, dir);
 		await other.client.request("submit", { text: "two" });
 		await until(other.conversation, answered("while it was away"));
 
 		const next = await reconnecting;
 		clients.push(next);
-		await first.conversation.reattach(next, dir, {});
+		await first.conversation.reattach(next, dir);
 		const view = await until(first.conversation, answered("while it was away"));
 		expect(view.items.map((item) => item.kind)).not.toContain("gap");
 		const ids = entries(view).map((entry) => entry.id);
@@ -326,12 +419,12 @@ describe("daemon", () => {
 	it("loads earlier entries page by page, until the start", async () => {
 		await start(answers(80));
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await converse(connected, conversation, 0, 80);
 		const id = conversation.id;
 		if (id === undefined) throw new Error("attached without an id");
 		const fresh = await client();
-		await fresh.conversation.attach({ kind: "id", id }, dir, {});
+		await fresh.conversation.attach({ kind: "id", id }, dir);
 		let view = await until(fresh.conversation, (latest) => latest.items.length > 0);
 		const total = (await connected.request("entries", { limit: 500 })).entries.length;
 		expect(total).toBeGreaterThan(150);
@@ -348,7 +441,7 @@ describe("daemon", () => {
 	it("fills the gap a long outage leaves", async () => {
 		await start(answers(70));
 		const first = await client();
-		await first.conversation.attach({ kind: "new" }, dir, {});
+		await first.conversation.attach({ kind: "new" }, dir);
 		const id = first.conversation.id;
 		if (id === undefined) throw new Error("attached without an id");
 		await converse(first.client, first.conversation, 0, 2);
@@ -357,11 +450,11 @@ describe("daemon", () => {
 
 		// More than the window holds (100) happens while it's away.
 		const other = await client();
-		await other.conversation.attach({ kind: "id", id }, dir, {});
+		await other.conversation.attach({ kind: "id", id }, dir);
 		await converse(other.client, other.conversation, 2, 70);
 
 		const next = await client();
-		await first.conversation.reattach(next.client, dir, {});
+		await first.conversation.reattach(next.client, dir);
 		const gapped = await until(first.conversation, answered("answer 69"));
 		expect(gapped.items.map((item) => item.kind)).toContain("gap");
 		await first.conversation.fillGaps(BACKGROUND_CONTEXT);
@@ -376,9 +469,9 @@ describe("daemon", () => {
 	it("stays attached when attaching to a conversation that isn't there", async () => {
 		await start([fauxAssistantMessage("still attached")]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		const id = conversation.id;
-		await expect(conversation.attach({ kind: "number", number: 9 }, dir, {})).rejects.toThrow(DaemonError);
+		await expect(conversation.attach({ kind: "number", number: 9 }, dir)).rejects.toThrow(DaemonError);
 		expect(conversation.id).toBe(id);
 		await connected.request("submit", { text: "are you there" });
 		await until(conversation, answered("still attached"));
@@ -416,7 +509,7 @@ describe("daemon", () => {
 				id: 1,
 				error: { message: expect.stringMatching(/^Not a request: \/method /u) },
 			});
-			const attach = { target: { kind: "number", number: 0 }, cwd: dir, env: {} };
+			const attach = { target: { kind: "number", number: 0 }, cwd: dir };
 			expect(await ask(JSON.stringify({ id: 2, method: "attach", params: attach }))).toEqual({
 				id: 2,
 				error: { message: expect.stringMatching(/^Bad params for attach: \/target\/number /u) },
@@ -451,6 +544,7 @@ describe("daemon", () => {
 				storage: await openNodeSqliteStorage(join(dir, "pier.sqlite")),
 				models: createModels(),
 				model: { provider: "faux", modelId: "faux-1" },
+				environment: { login },
 			}),
 		).rejects.toThrow("No model faux/faux-1");
 	});
@@ -465,6 +559,7 @@ describe("daemon", () => {
 				storage: await openNodeSqliteStorage(join(dir, "other.sqlite")),
 				models,
 				model: { provider: "faux", modelId: "faux-1" },
+				environment: { login },
 			}),
 		).rejects.toThrow(/already listening/u);
 	});
@@ -489,7 +584,7 @@ describe("daemon", () => {
 	it("changes a conversation's model, and clamps a thinking level the model doesn't support", async () => {
 		await start([]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		// The faux model doesn't reason: every level but off is clamped to off.
 		const model = (await connected.request("models", {})).models.find((each) => each.id === "faux-1");
 		expect(model?.thinkingLevels).toEqual(["off"]);
@@ -515,7 +610,7 @@ describe("daemon", () => {
 			fauxAssistantMessage("branch answer"),
 		]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await converse2(connected, conversation, ["one", "first answer"], ["two", "second answer"]);
 		const parent = conversation.number;
 		const before = (await connected.request("entries", { limit: 50, order: "ascending" })).entries.filter(
@@ -523,7 +618,7 @@ describe("daemon", () => {
 		)[1];
 		if (before === undefined || parent === undefined) throw new Error("no second message");
 		const { number } = await connected.request("fork", { before: before.id });
-		await conversation.attach({ kind: "number", number }, dir, {});
+		await conversation.attach({ kind: "number", number }, dir);
 		const forked = await until(conversation, answered("first answer"));
 		const said = entries(forked).flatMap((entry) => (entry.kind === "pi.user" ? [JSON.stringify(entry.model)] : []));
 		expect(said).toHaveLength(1);
@@ -542,7 +637,7 @@ describe("daemon", () => {
 	it("forks before the first message as a new conversation like it", async () => {
 		await start([fauxAssistantMessage("first answer")]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await converse2(connected, conversation, ["one", "first answer"]);
 		const first = (await connected.request("entries", { limit: 50 })).entries.find((entry) => entry.kind === "pi.user");
 		if (first === undefined) throw new Error("no message");
@@ -551,7 +646,7 @@ describe("daemon", () => {
 			(summary) => summary.number === number,
 		)?.parent;
 		expect(parent?.number).toBe(conversation.number);
-		await conversation.attach({ kind: "number", number }, dir, {});
+		await conversation.attach({ kind: "number", number }, dir);
 		expect((await connected.request("entries", { limit: 50 })).entries).toEqual([]);
 		await expect(connected.request("fork", { before: 1 as never })).rejects.toThrow(/your messages/u);
 	});
@@ -566,7 +661,7 @@ describe("daemon", () => {
 			fauxAssistantMessage("next answer"),
 		]);
 		const { client: connected, conversation } = await client();
-		await conversation.attach({ kind: "new" }, dir, {});
+		await conversation.attach({ kind: "new" }, dir);
 		await connected.request("submit", { text: "start" });
 		await until(conversation, (latest) => !idle(latest));
 		await connected.request("submit", { text: "queued one", whenBusy: "followUp" });
@@ -597,7 +692,7 @@ describe("daemon", () => {
 
 		async function answeredOnce(): Promise<string> {
 			const { client: connected, conversation } = await client();
-			await conversation.attach({ kind: "new" }, dir, {});
+			await conversation.attach({ kind: "new" }, dir);
 			await connected.request("submit", { text: "hi" });
 			const view = await until(conversation, (latest) => idle(latest) && answered("answer")(latest));
 			const sessionId = sessionOf(view);
@@ -647,7 +742,7 @@ describe("daemon", () => {
 		it("tells the attached client, says so in the list, and Esc ends it", async () => {
 			await start([]);
 			const { client: connected, conversation } = await client();
-			await conversation.attach({ kind: "new" }, dir, {});
+			await conversation.attach({ kind: "new" }, dir);
 			const id = conversation.id;
 			if (id === undefined) throw new Error("attached without an id");
 			expect(conversation.blocked).toEqual([]);
@@ -672,7 +767,7 @@ describe("daemon", () => {
 		it("tells a client that attaches after the task was blocked, as at a daemon's start", async () => {
 			await start([]);
 			const first = await client();
-			await first.conversation.attach({ kind: "new" }, dir, {});
+			await first.conversation.attach({ kind: "new" }, dir);
 			const id = first.conversation.id;
 			if (id === undefined) throw new Error("attached without an id");
 			await blockIn(id);
@@ -689,11 +784,12 @@ describe("daemon", () => {
 				models,
 				model: { provider: "faux", modelId: "faux-1" },
 				extensions: [createPrompt({ agentDir: join(dir, "agent") })],
+				environment: { login },
 				log: (message) => logged.push(message),
 			});
 			expect(logged.some((line) => /blocked: missing_task/u.test(line))).toBe(true);
 			const again = await client();
-			await again.conversation.attach({ kind: "id", id }, dir, {});
+			await again.conversation.attach({ kind: "id", id }, dir);
 			await expect.poll(() => again.conversation.blocked.map((task) => task.reason)).toEqual(["missing_task"]);
 		});
 
@@ -701,7 +797,7 @@ describe("daemon", () => {
 		it("runs on, unblocked, once the daemon has the task's code", async () => {
 			await start([]);
 			const first = await client();
-			await first.conversation.attach({ kind: "new" }, dir, {});
+			await first.conversation.attach({ kind: "new" }, dir);
 			const id = first.conversation.id;
 			if (id === undefined) throw new Error("attached without an id");
 			const task = await blockIn(id);
@@ -729,9 +825,10 @@ describe("daemon", () => {
 					createPrompt({ agentDir: join(dir, "agent") }),
 					defineExtension({ name: "test.tasks", tasks: [Installed] }),
 				],
+				environment: { login },
 			});
 			const again = await client();
-			await again.conversation.attach({ kind: "id", id }, dir, {});
+			await again.conversation.attach({ kind: "id", id }, dir);
 			const done = await daemon.harness.waitForTask(task as never, BACKGROUND_CONTEXT);
 			expect(done.state.outcome.status).toBe("completed");
 			await expect.poll(() => again.conversation.blocked).toEqual([]);
@@ -740,7 +837,7 @@ describe("daemon", () => {
 		it("tells of a blocked background task, without marking the conversation blocked", async () => {
 			await start([]);
 			const { client: connected, conversation } = await client();
-			await conversation.attach({ kind: "new" }, dir, {});
+			await conversation.attach({ kind: "new" }, dir);
 			const id = conversation.id;
 			if (id === undefined) throw new Error("attached without an id");
 			await blockIn(id, true);
@@ -752,9 +849,9 @@ describe("daemon", () => {
 		it("doesn't tell a client attached to another conversation", async () => {
 			await start([]);
 			const stuck = await client();
-			await stuck.conversation.attach({ kind: "new" }, dir, {});
+			await stuck.conversation.attach({ kind: "new" }, dir);
 			const other = await client();
-			await other.conversation.attach({ kind: "new" }, dir, {});
+			await other.conversation.attach({ kind: "new" }, dir);
 			const id = stuck.conversation.id;
 			if (id === undefined) throw new Error("attached without an id");
 			await blockIn(id);

@@ -199,13 +199,13 @@ export class AttachedConversation {
 		return this.#blocked;
 	}
 
-	async attach(target: AttachTarget, cwd: string, env: Record<string, string>): Promise<{ created: boolean }> {
+	async attach(target: AttachTarget, cwd: string): Promise<{ created: boolean }> {
 		// The same conversation resumes its transcript; the view of another starts a new one
 		// (`#receive`), so one that fails to attach leaves this as it was.
 		const resuming = target.kind === "id" && target.id === this.#transcriptOf;
 		this.#ended = undefined;
 		const window = resuming ? this.#transcript.resume : undefined;
-		const result = await this.#client.request("attach", { target, cwd, env, ...(window ? { window } : {}) });
+		const result = await this.#client.request("attach", { target, cwd, ...(window ? { window } : {}) });
 		this.#id = result.conversation;
 		this.#number = result.number;
 		return { created: result.created };
@@ -216,7 +216,7 @@ export class AttachedConversation {
 	 * one dropped (or the same one, after its view ended), resuming the transcript: the
 	 * daemon sends only what was missed, or its newest entries and a gap.
 	 */
-	async reattach(client: PierClient, cwd: string, env: Record<string, string>): Promise<void> {
+	async reattach(client: PierClient, cwd: string): Promise<void> {
 		const id = this.#id;
 		if (id === undefined) throw new Error("Not attached to a conversation yet");
 		if (client !== this.#client) {
@@ -224,7 +224,7 @@ export class AttachedConversation {
 			this.#client = client;
 			this.#unlisten = client.onEvent((event) => this.#receive(event));
 		}
-		await this.attach({ kind: "id", id }, cwd, env);
+		await this.attach({ kind: "id", id }, cwd);
 	}
 
 	/** Load the page of entries before the oldest one held. */

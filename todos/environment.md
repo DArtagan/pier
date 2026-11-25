@@ -26,11 +26,13 @@ and then using that to refresh the remote.md spec - before beginning work on it.
 
 ## Where things stand
 
-Nothing is built. pier 0.7.0 (`main` at `7dc5aef`): `attach` sends the pane's whole
-environment, stored as `pier.client-env` (`ClientEnvDoc`, `src/host/daemon.ts`) and laid
-over the daemon's own for every tool call. That was Will's decision of 2026-10-29
-(*"keep it simple by passing through the whole environment. We can refine it later."*),
-which this reverses.
+Steps 1 and 2 are built (2026-11-25, branch `environment`, not yet merged): the YAML
+config, and the contract's variables for every bash call. What they are is in
+`README.md` ("Configuration", "The environment tools run with") and `docs/history.md`
+("The environment contract"). Dotfiles writes the config (`85c0ba0`, local, not pushed),
+and keeps the unit's `GIT_CONFIG_GLOBAL` and `PIER_SKILLS` until pier is bumped past
+0.7.0, which reads neither. **Waiting on:** Will's answer on `git push` (below), and a
+day of daily use before step 3.
 
 The contract was checked by running on thenixbeast on 2026-11-24, outside any terminal,
 through Durable's own `NodeExecutionEnv`: git, nix, locale and UTF-8 work; a pane's
@@ -69,6 +71,16 @@ Will, 2026-11-24, verbatim:
 - **Credentials:** *"I like your tiers. We can defer which specific machines & users
   when it comes to implementatiton."* *"Yes to a `GitHub` token made for agents."* The
   rest is `todos/credentials.md`.
+
+Will, 2026-11-25, verbatim, on step 2's open questions:
+
+- **Dotfiles writes the config:** asked whether Claude may change `modules/pi/pier.nix`
+  to write `config.yaml`, *"Please do."*
+- **A tool call before the project's environment is ready:** on waiting for direnv up
+  to a limit, then running without the project's variables, *"Yes, go with your
+  proposal - make the limit configurable."*
+- **`PIER_CONVERSATION`:** *"host#number is a good convention, go with that."* So
+  `thenixbeast#3`.
 
 ## The contract
 
@@ -134,23 +146,12 @@ stops accidental use; only isolation stops a deliberate one.
 
 Claude's ordering. Each step leaves pier working.
 
-1. **The YAML config.** Parse with `yaml` (in the tree at 2.9.0 through pi-coding-agent;
-   make it a direct, exact dependency), check with `pi-schema` as `src/host/protocol.ts`
-   checks requests. A missing file is an empty config; an invalid one stops the daemon
-   with its path and the error, as a bad `PIER_MODEL` does (`src/host/defaults.ts`). It
-   holds what the variables hold now (`model`, `thinking`, `skills`) plus
-   `tools.variables` and `tools.timeout`; nothing more yet. The daemon logs what it
-   read, as it logs `skills` (`src/host/cli.ts`). Dotfiles' `modules/pi/pier.nix` writes
-   it later: another repository, so Will's to OK.
-2. **The contract's variables for every tool call**, as above. Remove `pier.client-env`
-   and `attach`'s `env` (`src/host/protocol.ts`, the client's `environment()` in
-   `src/host/cli.ts`), and bump `PROTOCOL_VERSION`; stored `pier.client-env` documents
-   are no longer read. Shape the contract, the probe and the direnv source for
-   `src/layer/` (p3 needs the same); the daemon only wires them. Test over a real
-   socket with the faux model: a variable set only in the daemon's process, and one a
-   pane sends, don't reach a tool; a project's direnv variable does. Then disable the
-   change and watch the test fail. Re-run `experiments/environment/contract-check.mjs`
-   and use it for a day before step 3.
+1. **The YAML config.** Built (`src/host/config.ts`).
+2. **The contract's variables for every tool call.** Built (`src/layer/environment.ts`:
+   `ToolEnvironment`, whose `variables()` step 3's redaction can read the project's
+   from, and `ProjectEnvironments`). The keep-out test fails with `inheritEnv: true`
+   (checked); `contract-check.mjs` passed every check in pier, vulcanus-proxmox and
+   dotfiles on 2026-11-25. Not yet used for a day.
 3. **Telling the model about secrets.** A prompt section, present when a project's
    variables include its `.env`'s, naming them (never values) and pointing to a skill;
    the skill, offered with pier's own, with the guidance: check a variable is set with

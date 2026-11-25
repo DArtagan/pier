@@ -33,7 +33,7 @@ In order, verbatim. Later ones that replace earlier ones say so.
   - *"Yes, one SQLite for all conversations"*.
   - *"Yes, for now keep it simple by passing through the whole environment. We can
     refine it later."* `SSH_AUTH_SOCK` included, despite the conflict with dotfiles'
-    `todos/ssh-agent.md`.
+    `todos/ssh-agent.md`. Reversed on 2026-11-24 ("The environment contract", below).
   - *"Yes, those definitions are fine for quit, exit, detach."* `/quit` stops the run,
     then leaves; `/exit` waits for it; `/detach` leaves it running.
   - On the transport: *"I don't know enough to make a decision here - please describe
@@ -308,6 +308,38 @@ specifically `ketch`, to enable online research."* What it does now is in `READM
   and a check batched after it missed the first call's file 5 times in 5 with
   `"parallel"`, and never with `"sequential"`. A daemon test now fails without the
   setting.
+
+## The environment contract
+
+Until 0.7.0, `attach` sent the pane's whole environment, stored per conversation as
+`pier.client-env` and laid over the daemon's for every tool call. On 2026-11-24 Will
+reversed it: *"Passing through the pane's whole environment might not be the best plan
+after all. … A good place to start might be by explicitly defining what the parts of an
+"environment" are … anything not in that contract should be isolated away/disallowed."*
+Then, the same day: *"Yes, panes should stop passing their whole environment"*, *"Allowlist
+is a good principle"*, *"Login shell sounds good as a base"*, and a daemon-owned YAML
+configuration with a schema in place of more `PIER_*` variables (*"Ideally we build
+something that is portable to non-Nix systems"*). On 2026-11-25: wait for a project's
+direnv up to a configurable limit, and name a conversation `host#number`.
+
+What the checks found (`experiments/environment/`, 2026-11-24, thenixbeast, outside any
+terminal):
+
+- **A pane carried far more than its project:** 155 variables, among them the keyring's
+  `SSH_AUTH_SOCK`, `WAYLAND_DISPLAY`, `SWAYSOCK`, `TMUX` and D-Bus, all stored in the
+  backed-up SQLite file. A login shell from an empty environment has 48.
+- **`inheritEnv: false` drops `NodeExecutionEnv`'s `shellEnv` too** (Durable 1.6.0,
+  `getShellEnv`), which left a command with no `PATH`. So the contract goes in each
+  call's `env`, through bash's `prepare` hook.
+- **direnv's export is a difference against what it's given:** given the filtered base,
+  it re-added the desktop's variables; given the whole login environment, it didn't.
+- **A first direnv evaluation is slow** (3.5 s for pier, 25.7 s for vulcanus-proxmox,
+  then 0.13 s), hence the background evaluation, the cache and the wait.
+- **Variables aren't a boundary:** with the key unlocked, a tool authenticated to
+  GitHub through the keyring's socket by its path, with no variable set.
+- **Wrong turns:** the first probe couldn't find `bash` (an empty environment has no
+  `PATH`; the login shell is named by its absolute path), and the first negative control
+  passed everything (a flipped boolean ran the contract twice; caught because it passed).
 
 ## Where the proof of concept ended
 

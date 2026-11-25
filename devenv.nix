@@ -4,7 +4,11 @@
 }:
 
 {
-  packages = [ pkgs.git ];
+  # direnv: the tests evaluate a project's environment as the daemon does.
+  packages = [
+    pkgs.direnv
+    pkgs.git
+  ];
 
   languages = {
     nix.enable = true;

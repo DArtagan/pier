@@ -93,14 +93,72 @@ and its tool calls; a **run** is the turns from an input to its **final answer**
 response with no tool calls that ends it. A conversation is busy while a run is going.
 
 Conversations are numbered #1, #2, … on each host. Any number of panes can attach to
-one conversation. Each conversation's tools run in its directory, with the environment
-of the last pane that attached to it.
+one conversation. Each conversation's tools run in its directory, with the variables
+the environment contract gives them, and nothing of the pane's (below).
 
 The socket is `$XDG_RUNTIME_DIR/pier/pier.sock` and the storage
-`$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET`, `PIER_STATE_DIR`, `PIER_MODEL`
-(`claude-code/claude-opus-5-5`) and `PIER_THINKING` (`high`) override them. The daemon
-refuses to start with a model it can't run, or a thinking level that isn't pi's.
-`PIER_SKILLS` lists the skills the daemon offers (below, "Skills").
+`$XDG_STATE_HOME/pier/pier.sqlite`; `PIER_SOCKET` and `PIER_STATE_DIR` override them.
+
+## Configuration
+
+The daemon owns its configuration: `$XDG_CONFIG_HOME/pier/config.yaml`, or the file
+`PIER_CONFIG` names. It's read once, when the daemon starts, which logs what it read.
+No file means the defaults. A file that isn't YAML, or holds a key or value pier doesn't
+know, stops the daemon with the file's path and what's wrong: quote a value that YAML
+would read as a number or a boolean (`"1.10"`, `"yes"`).
+
+```yaml
+model: claude-code/claude-opus-5-5   # provider/model, for new conversations
+thinking: high                       # one of pi's thinking levels
+skills:                              # skill directories, absolute (below, "Skills")
+  - /nix/store/…-ketch/share/skills/ketch
+tools:
+  variables:                         # set for every tool call
+    GIT_CONFIG_GLOBAL: /home/will/.config/git/config-agent
+  timeout: 600                       # seconds, for a bash call that sets none
+```
+
+`PIER_MODEL`, `PIER_THINKING` and `PIER_SKILLS` override `model`, `thinking` and
+`skills`. The daemon refuses to start with a model it can't run, or a thinking level
+that isn't pi's. `tools` is what tool calls run with (below), and `tools.projectWait`
+(seconds, default 60) how long a call waits for its project's environment. On Will's
+hosts Nix writes the file; elsewhere it's written by hand. The service manager
+(systemd, or a foreground `pier daemon`) only supervises.
+
+## The environment tools run with
+
+A tool call gets exactly these variables, later ones winning, and nothing else: not the
+daemon's own, not the pane's. An allowlist, never a denylist (`src/layer/environment.ts`).
+
+- **Base:** the user's login shell (`getent passwd`), run once at the daemon's start as
+  `<shell> -lc 'env -0'` from only `HOME` and `USER`, as a new terminal gets it, then
+  kept to `HOME USER LOGNAME SHELL PATH LANG LC_* TZ TZDIR TMPDIR LOCALE_ARCHIVE NIX_PATH
+  NIX_PROFILES NIX_USER_PROFILE_DIR TERMINFO_DIRS XDG_DATA_DIRS XDG_CONFIG_DIRS
+  XDG_RUNTIME_DIR`, and `TERM=dumb`. A change to the profile reaches tools at the
+  daemon's next start.
+- **Project:** `direnv export json` in the conversation's directory, given the whole
+  login environment (direnv reports a difference against what it's given). Only an
+  allowed `.envrc` runs. A project's `.env`, if its `.envrc` loads it, passes as it is:
+  pointing a conversation at a project grants it the project's secrets. Evaluated in the
+  background and cached per directory, again when a file direnv watches changes (the
+  `.envrc`, devenv's files, `direnv allow`). A call waits for an evaluation up to
+  `tools.projectWait`, then runs without it; the prompt says when the project's
+  environment is still being prepared, isn't allowed, or failed.
+- **Agent settings:** the configuration's `tools.variables`, such as `GIT_CONFIG_GLOBAL`
+  or `PAGER=cat`.
+- **Identity:** `PIER=1` and `PIER_CONVERSATION=<host>#<number>`, as `thenixbeast#3`.
+
+A call runs in bash, non-login and non-interactive, with stdin closed and no terminal,
+in the conversation's directory, under `tools.timeout` when the model sets none. `read`,
+`write` and `edit` take no environment.
+
+So a `nix shell`, an `export` or an `ssh-agent` in a pane doesn't reach tools: put it in
+the project's `.envrc`, or in `tools.variables`. **Variables aren't a boundary.** A tool
+runs as you: it can still read `~/.ssh`, reach an SSH agent or the tmux server by its
+socket's path, and read other processes' environments in `/proc`. Leaving variables out
+stops accidental use, not a deliberate one; only isolation would. Claude Code's own
+environment is the daemon's, which pi-claude-code passes on: it's the provider's, not a
+tool's.
 
 ## Layout
 
@@ -111,18 +169,20 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
     sends requests through Claude Code (below);
   - `prompt.ts` builds the system prompt from AGENTS.md files, found the way pi finds
     them;
-  - `skills.ts` lists the skills the model is offered (below).
+  - `skills.ts` lists the skills the model is offered (below);
+  - `environment.ts` is the environment contract: the variables tool calls run with
+    (above).
 - `src/host/` is what's thrown away when p3 takes over: `daemon.ts` runs the Harness and
   serves it on the socket, `protocol.ts` is what goes over it (the daemon checks each
   request against its schemas), `client.ts` and `tui.ts` are the client (`commands.ts`
-  its slash commands and their menus), and `cli.ts` is `pier` (`defaults.ts` the model
-  it runs).
+  its slash commands and their menus), and `cli.ts` is `pier` (`config.ts` the daemon's
+  configuration, `defaults.ts` the model it runs).
 - `experiments/gate/` holds the gate: real Claude Code turns against a Durable Harness,
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
 - `experiments/transcript/` measures the terminal client with a long transcript.
-- `experiments/environment/` runs tool commands as the environment contract would
-  (`todos/environment.md`), outside any terminal: what works, what's kept out
+- `experiments/environment/` runs tool commands as the environment contract does
+  (above), outside any terminal: what works, what's kept out
   (`contract-check.mjs`), and what a tool can still reach as you (`authority-check.mjs`).
 - `experiments/cwd/` studies Claude Code's environment block: what it says under
   different directories and flags, against a stub API (`env-block.ts`); and, with real
@@ -192,12 +252,12 @@ pi's extension API. It's in git history, and `docs/history.md` records what it t
 The prompt lists the skills the model may use, in the
 [agentskills.io](https://agentskills.io) format: each skill's name, description and
 `SKILL.md`. When a task matches one, the model reads its `SKILL.md` with the `read` tool,
-then runs the command it describes with `bash`, in the pane's environment. So the
-command must be on the pane's PATH. They come from two places, read before each
+then runs the command it describes with `bash`, under the environment contract (above).
+So the command must be on the login shell's PATH, or the project's. They come from two places, read before each
 request, so a change shows on the next one:
 
-- **`PIER_SKILLS`**: the daemon's skill directories, absolute paths separated by `:`
-  as in `PATH`. Each is one skill (holding `SKILL.md`) or a directory of them. Point it
+- **`skills`** in the configuration, or **`PIER_SKILLS`**: the daemon's skill
+  directories, absolute paths (in `PIER_SKILLS`, separated by `:` as in `PATH`). Each is one skill (holding `SKILL.md`) or a directory of them. Point it
   at a package's `share/skills/<pname>`, where nixpkgs' `installAgentSkills` hook puts
   a package's skills (`share/skills/<pname>/<skill>/SKILL.md`). The daemon reads it
   when it starts, and logs the list.
@@ -206,8 +266,8 @@ request, so a change shows on the next one:
   repository, only its own directory.
 
 When two skills share a name, the project's wins, then the nearer directory, then the
-earlier one in `PIER_SKILLS`. pier reads nothing of classic pi's for skills: not
-`~/.pi/agent/skills`, not `settings.json`, not pi packages. Without `PIER_SKILLS`, only
+earlier one in the list. pier reads nothing of classic pi's for skills: not
+`~/.pi/agent/skills`, not `settings.json`, not pi packages. Without either, only
 projects' skills are offered.
 
 **No trust check.** A project's skills load without asking, as its AGENTS.md does

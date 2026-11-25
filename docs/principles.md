@@ -94,8 +94,9 @@ these rest on are in `AGENTS.md` and `docs/upstream.md`; the history behind them
   - The web UI's listener is on loopback and the tailnet only, never a public
     interface, and nothing is reachable there without signing in.
   - Its socket and state directories are private.
-  - Each conversation's tools run with the environment of the pane that last attached
-    (Will, 2026-10-29: pass the whole environment, refine later).
+  - Each conversation's tools run with the environment contract's variables only
+    (README, "The environment tools run with"): an allowlist, never a pane's
+    environment (Will, 2026-11-24, reversing 2026-10-29's whole environment).
 - **Use what the environment already has** instead of building equivalents: Nix and
   devenv, systemd (for supervision and the cgroup kill), tmux, SSH.
 - **Few dependencies, all pinned, all fetchable without git or SSH:** tarballs, not
