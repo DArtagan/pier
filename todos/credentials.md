@@ -81,6 +81,119 @@ that doesn't need a password typed.
 - **sops-nix and systemd credentials** (`systemd-creds`, `LoadCredential=`): secrets as
   files given to one service, readable only by it, never in its environment.
 
+## Related art, to evaluate
+
+Gathered by Will on 2026-11-25, for future evaluation. Each note below is from its own
+README or site, read 2026-11-25 (Boundary from its docs: the product page answered
+HTTP 429); nothing was installed or tried, and none of it is evaluated yet. The pages
+are tagged `credentials-art` in ketch (`ketch tag show credentials-art`). Grouped by
+the principle or design question each bears on most; several span groups, and the
+notes say where.
+
+What they share: the commercial ones have all moved, by late 2026, into credentials
+for AI agents (brokering, placeholders, just-in-time grants), so "use without
+exposure" (principle 6) is now a product category, not only p2's idea.
+
+- **Secret stores, and handing values to tools** (design questions 1 and 2;
+  principles 1, 7 and 12):
+  - [SOPS](https://github.com/getsops/sops): an editor of encrypted files (YAML, JSON,
+    ENV, INI, binary), with age, PGP or a cloud KMS; a CNCF sandbox project. Already in
+    use (dotfiles, vulcanus-proxmox); see "What exists today".
+  - [1Password](https://1password.com/): already installed ("What exists today").
+    Secret references (`op://vault/item/[section/]field`) resolved by `op read`,
+    `op run` (as variables, to one subprocess) or `op inject` (into a config file):
+    principle 1's "by reference". Service accounts restrict the CLI to some vaults
+    (principle 4); "Environments" (beta) pass a project's variables without
+    references, close to a `.env` migration (principle 10). Newer: a Credential
+    Broker (public preview, Enterprise) that verifies a workload by OIDC and logs each
+    delivery, starting with GitHub Actions; and "Privileged Access", just-in-time.
+  - [Infisical](https://github.com/infisical/infisical): open source, self-hostable or
+    cloud; now a platform for secrets, certificates, privileged access (PAM) and
+    agents' access. Secrets: `infisical run -- <cmd>` injects them as variables, an
+    agent daemon renders them into files, plus rotation, dynamic (short-lived) secrets
+    and honey tokens. Its PAM for AI agents
+    ([docs](https://infisical.com/docs/documentation/platform/pam/ai-agents/overview))
+    belongs under the next group too: `infisical pam access <account> -- <cmd>` opens a
+    recorded session through a gateway that adds the credential, so it never reaches
+    the agent's machine.
+  - [Stacklok](https://stacklok.com/): an enterprise MCP platform (registry, gateway,
+    Kubernetes runtime). Its open-source [ToolHive](https://github.com/stacklok/toolhive)
+    runs each MCP server in a container, with
+    [secrets](https://docs.stacklok.com/toolhive/guides-cli/secrets-management) from
+    one provider: its own encrypted store (the password in the OS keyring), 1Password
+    (read-only, by `op://` reference) or environment variables. Relevant only if pier's
+    tools come to include MCP servers.
+- **Use without exposure, for agents** (principle 6; p2's placeholders; tier 3):
+  - [Infisical's agent-vault](https://github.com/Infisical/agent-vault): an HTTP
+    credential proxy. The agent's environment gets `HTTPS_PROXY`; the proxy intercepts
+    (MITM) and swaps dummy values in headers for real credentials, or replaces the auth
+    header, per service; egress filtering (an unknown host denied in strict mode) and
+    request logs. The same shape as p2's placeholders. **The standalone repository is
+    no longer recommended**: Infisical points new setups at Agent Vault inside
+    Infisical (access bundles, time-bound sessions).
+  - [HashiCorp Boundary](https://developer.hashicorp.com/boundary/docs/overview/what-is-boundary):
+    identity-based access to hosts, databases and applications through a proxy that
+    injects credentials, so users connect with their usual clients and never hold them;
+    short-lived credentials from HashiCorp Vault; sessions recorded; just-in-time
+    access. Server editions are HCP (hosted) and Enterprise; Formal's comparison says
+    there's a Community Edition too (not checked). Heavyweight for one person.
+  - [lockfamily](https://github.com/DavidGodefroid/lockfamily): Will: *"probably too
+    young to matter, but is interesting"*. Every tool is before v1. Each data source
+    (databases, queues, files, logs, servers; `lockhttp` and `lockssh` pre-release)
+    sits behind a "Lock" that holds the credential and masks personal data in results;
+    reads pass by rule, while a write or a connection waits for approval in `lox run`,
+    a terminal outside the agent's harness, and `lox audit` logs both. Runs in Docker.
+    Its README says the guarantees hold against a prompt-injected agent only when the
+    agent runs confined (in its `lea`). Closest of the list to principle 5's tier 3
+    (approve the exact command, outside the agent) and to principle 11's caveat.
+  - [Formal](https://www.formal.ai): two proxies under one control plane (policies in
+    Rego, one audit log). "Endpoint" is a forward proxy on laptops, VMs and agent
+    sandboxes: egress control, API keys held at the proxy rather than in the sandbox.
+    "Connector" is a reverse proxy in front of databases, Kubernetes, SSH and MCP
+    servers, applying policy per query or command, with sessions recorded. No vault.
+    Commercial. Its [comparison of PAM tools](https://www.formal.ai/compare/best-pam-solutions/)
+    (its own, updated 2026-11-10) covers ten: BeyondTrust, CyberArk, Delinea (with
+    StrongDM), Formal, Boundary, KeeperPAM, ManageEngine PAM360, Netwrix, Okta
+    Privileged Access and Teleport; it names Segura, WALLIX, Securden, One Identity
+    Safeguard, ARCON, Devolutions and Entra PIM as unread. Mostly enterprise PAM.
+- **SSH and infrastructure access: bastions, short-lived certificates, recorded
+  sessions** (tier 2; principles 4, 5 and 8):
+  - [The Bastion](https://github.com/ovh/the-bastion) (OVH): an SSH bastion, the single
+    entry point to servers. Each user has an account and joins groups that reach some
+    infrastructure, which trusts the groups' keys rather than each user; sessions
+    recorded (ttyrec, interactive and not); MFA; a JSON API over SSH; plain `ssh` at
+    both ends, no database.
+  - [BLESS](https://github.com/Netflix/bless) (Netflix): an SSH certificate authority,
+    as an AWS Lambda, that signs short-lived certificates so hosts trust a CA instead
+    of `authorized_keys`. **Archived**: Netflix no longer maintains it. The idea (a
+    short-lived certificate per grant) is what matters for tier 2, not the code.
+  - [Teleport](https://github.com/gravitational/teleport): an identity-aware proxy
+    and a CA issuing short-lived certificates in place of SSH keys or Kubernetes
+    tokens, for SSH, Kubernetes, databases, RDP, web apps, Git and MCP servers; MFA,
+    SSO, sessions recorded, just-in-time access requests. One Go binary; a Community
+    Edition with public code (its license terms not checked).
+  - [Warpgate](https://github.com/warp-tech/warpgate): a transparent bastion for SSH,
+    HTTPS, Kubernetes, MySQL, PostgreSQL, RDP and VNC that needs no client software;
+    users assigned to hosts, every session recorded and replayable in a web UI, TOTP
+    and OpenID Connect, "tickets" as temporary access credentials. One Rust binary,
+    self-hosted.
+- **Network access** (design question 5, `todos/remote.md`), several now with PAM
+  features that bear on tier 2:
+  - [Tailscale](https://tailscale.com): the tailnet pier's remote access already
+    weighs. [Tailscale SSH](https://tailscale.com/kb/1193/tailscale-ssh.md) takes port
+    22 on the tailnet and authorizes by its access rules instead of SSH keys; check
+    mode makes some connections (as root, say) re-authenticate, then holds for 12
+    hours or a set period; sessions can be recorded. Check mode is principle 5's
+    "closer attention" for tier 2, already built.
+  - [Twingate](https://www.twingate.com/): zero-trust network access, per resource,
+    not per network; its own proxy, not WireGuard; a hosted controller with connectors
+    you run. Now also PAM: short-lived, audited access in place of static SSH keys and
+    kubeconfigs. A Home plan for non-commercial homelabs.
+  - [Pangolin](https://github.com/fosrl/pangolin): open source, on WireGuard; access by
+    identity to web apps, SSH, remote desktops, databases and AI models, each grant
+    logged, from a browser or a client. Self-hosted Community Edition, or a cloud. Has
+    an identity-aware gateway for AI agents' model traffic.
+
 ## Principles, proposed
 
 Each with why. The design must keep all of them, or say which it bends and why.
