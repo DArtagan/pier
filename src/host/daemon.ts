@@ -138,6 +138,7 @@ export async function startDaemon(options: DaemonOptions): Promise<Daemon> {
 		log,
 	});
 	registry.install(environment.tools());
+	log(`projects' environments: ${environment.projects.direnv ?? "no direnv, so none"}`);
 	// pi-claude-code runs Claude Code in the directory this records for each conversation.
 	registry.install(ConversationDirectories);
 	for (const extension of options.extensions ?? [createPrompt(), createSkills()]) registry.install(extension);

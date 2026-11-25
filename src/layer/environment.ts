@@ -13,8 +13,9 @@
 // `write` and `edit` take no environment. Variables aren't a boundary: a tool still runs
 // as the user, and can reach what the user can by path.
 import { spawn, spawnSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { userInfo } from "node:os";
+import { delimiter, join } from "node:path";
 import { inflateSync } from "node:zlib";
 import type { Context } from "@earendil-works/chord/context";
 import {
@@ -130,9 +131,31 @@ interface Entry {
 	evaluating?: Promise<void>;
 }
 
+/**
+ * The first executable `name` on any of `paths` (PATH-style lists), in order: so the login
+ * shell's PATH first, then the daemon's own. Undefined if none has it.
+ */
+export function findExecutable(name: string, paths: readonly (string | undefined)[]): string | undefined {
+	for (const list of paths) {
+		for (const dir of (list ?? "").split(delimiter)) {
+			if (dir === "") continue;
+			const candidate = join(dir, name);
+			try {
+				accessSync(candidate, constants.X_OK);
+				if (statSync(candidate).isFile()) return candidate;
+			} catch {
+				// Not here.
+			}
+		}
+	}
+	return undefined;
+}
+
 export interface ProjectEnvironmentsOptions {
 	/** The whole login environment: direnv reports a difference against what it's given. */
 	login: Readonly<Record<string, string>>;
+	/** direnv, by path. Default the first on the login shell's PATH, else on the daemon's own. */
+	direnv?: string;
 	log?: (message: string) => void;
 	/** How long one evaluation may take. Default ten minutes: a changed devenv.nix may build. */
 	timeoutMs?: number;
@@ -143,14 +166,17 @@ export interface ProjectEnvironmentsOptions {
  * whole login environment, as a shell entering the directory would get it. Evaluated in
  * the background and cached; evaluated again when a file direnv watches changes
  * (`DIRENV_WATCHES`: the `.envrc`, devenv's files, direnv's allow list). Only an allowed
- * `.envrc` runs: direnv's own trust gate. direnv is found on the login shell's PATH.
+ * `.envrc` runs: direnv's own trust gate. Without direnv, no project has an environment.
  */
 export class ProjectEnvironments {
 	readonly #entries = new Map<string, Entry>();
 	readonly #options: ProjectEnvironmentsOptions;
+	/** direnv, by path; undefined when there's none. */
+	readonly direnv: string | undefined;
 
 	constructor(options: ProjectEnvironmentsOptions) {
 		this.#options = options;
+		this.direnv = options.direnv ?? findExecutable("direnv", [options.login.PATH, process.env.PATH]);
 	}
 
 	/**
@@ -198,7 +224,11 @@ export class ProjectEnvironments {
 	async #evaluate(dir: string, entry: Entry): Promise<void> {
 		const log = this.#options.log ?? (() => {});
 		const started = performance.now();
-		const result = await run("direnv", ["export", "json"], {
+		if (this.direnv === undefined) {
+			entry.current = { status: "none", variables: {}, watches: [] };
+			return;
+		}
+		const result = await run(this.direnv, ["export", "json"], {
 			cwd: dir,
 			// Without the variables of a direnv already loaded, so direnv starts afresh.
 			env: Object.fromEntries(Object.entries(this.#options.login).filter(([name]) => !name.startsWith("DIRENV_"))),

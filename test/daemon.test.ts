@@ -36,11 +36,13 @@ import { WebSocket, WebSocketServer } from "ws";
 import { AttachedConversation, connectWhenUp, DaemonError, PierClient } from "../src/host/client.ts";
 import { type Daemon, startDaemon } from "../src/host/daemon.ts";
 import { PROTOCOL_VERSION } from "../src/host/protocol.ts";
-import { probeLoginEnvironment } from "../src/layer/environment.ts";
+import { findExecutable, probeLoginEnvironment } from "../src/layer/environment.ts";
 import { createPrompt } from "../src/layer/prompt.ts";
 
 // The login shell's environment, probed once: the base of every tool call's variables.
 const login = await probeLoginEnvironment();
+// The direnv the daemon finds: the login shell's, else the test's (devenv's, in CI).
+const direnv = findExecutable("direnv", [login.PATH, process.env.PATH]) ?? "direnv";
 
 describe("daemon", () => {
 	let dir: string;
@@ -202,7 +204,7 @@ describe("daemon", () => {
 			// Not allowed: no variable, and the model is told.
 			expect(await toolOutput('echo "project:${PIER_TEST_PROJECT:-absent}"', project)).toContain("project:absent");
 
-			const allowed = spawnSync("direnv", ["allow", project], { env: sandboxed, encoding: "utf8" });
+			const allowed = spawnSync(direnv, ["allow", project], { env: sandboxed, encoding: "utf8" });
 			expect(allowed.status, allowed.stderr).toBe(0);
 			// direnv's allow list is one of the files it watches: the next call evaluates again.
 			expect(await toolOutput('echo "project:${PIER_TEST_PROJECT:-absent}"', project)).toContain("project:from-envrc");
