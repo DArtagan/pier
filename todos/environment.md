@@ -2,12 +2,15 @@
 
 ## Opening prompt
 
-> Read `docs/principles.md`, then `todos/environment.md`, then `todos/remote.md`
-> (component 4). Will asked for a formal contract of what a tool's environment is, with
-> everything outside it kept out, and then a choice of how each part is provided. Put
-> the open questions below to him, and record his answers here verbatim and dated.
-> Nothing is built until he has chosen. Check every measurement below again before
-> relying on it.
+> Read `AGENTS.md`, `docs/principles.md`, then this spec's "Decided" and "Plan" (the
+> rest is the evidence behind them: read the sections a step names). Build the plan's
+> steps in order, on a branch in a worktree, each step its own commit or pull request
+> with tests that fail without it. Will decided everything the plan needs on
+> 2026-11-24; where a step needs a choice the spec doesn't settle, ask him rather than
+> guess, and record his answer here, verbatim and dated. Check measurements again
+> before relying on them (`experiments/environment/`, `experiments/cwd/`). When it's
+> built, refresh `todos/remote.md` from it (Will: *"implementing the environment work,
+> and then using that to refresh the remote.md spec - before beginning work on it"*).
 
 Written 2026-11-24. Will's words that day: *"Passing through the pane's whole environment
 might not be the best plan after all. Please research and report on some alternative
@@ -198,8 +201,8 @@ Two lessons run through all of these:
 
 ## Checked by running (2026-11-24, thenixbeast)
 
-Two scripts, kept outside the repo (`/tmp/pier-remote-research/checks/`), ran each
-command the way a tool call would: through Durable 1.6.0's own `NodeExecutionEnv`, with
+Two scripts, `experiments/environment/contract-check.mjs` and `authority-check.mjs` (each
+says how to run it), ran each command the way a tool call would: through Durable 1.6.0's own `NodeExecutionEnv`, with
 `inheritEnv: false` and only the contract's variables. They ran in a transient systemd
 user unit, outside any terminal, as the daemon is. Three projects: pier's worktree,
 `vulcanus-proxmox`, `dotfiles`. The steamdeck was offline, so nothing was run as `willy`.
@@ -247,10 +250,13 @@ user unit, outside any terminal, as the daemon is. Three projects: pier's worktr
 - **Authority a tool still has, without any variable:**
   - SSH to GitHub with the contract's variables only: refused (`Permission denied
     (publickey)`). The key file needs a passphrase, and no agent was named.
-  - The same, naming the keyring's socket by its path (`/run/user/1001/gcr/ssh`): it
-    hung until the 20 s timeout, presumably the keyring asking on the desktop for the
-    passphrase. So the socket is reachable by path, and its behaviour depends on
-    whether the key is unlocked. Not investigated further.
+  - The same, naming the keyring's socket by its path (`/run/user/1001/gcr/ssh`): the
+    first run hung until the 20 s timeout, presumably the keyring asking on the desktop
+    for the passphrase. Run again later that day, it **succeeded** ("Hi DArtagan! You've
+    successfully authenticated"), the key having been unlocked in between. So any tool
+    can use Will's key by the socket's path whenever it's unlocked, with no variable at
+    all. Only isolation (part 3, reach) or a different agent (credentials, tier 2)
+    changes that.
   - `sudo -n` and `run0 --no-ask-password`: both refused, needing a password. Will is
     in `wheel`, and `wheelNeedsPassword` is true.
   - A pane's environment is readable from `/proc/<pid>/environ` by any process of
@@ -885,7 +891,8 @@ Proposal: b, filtered to the list, with e laid over it for anything Will wants t
 The probe runs at the daemon's start with the user's login shell by absolute path.
 
 **Project variables.** Above, c: direnv evaluated by the daemon, diffed against the full
-login environment, credentials filtered out unless granted, cached per directory.
+login environment, cached per directory. A project's `.env` passes as it is (Will's
+axiom, 2026-11-24); the filtering once proposed here was set aside.
 
 **Agent settings and the call's identity.** In pier's configuration (d). Today's are
 `GIT_CONFIG_GLOBAL`; to add, `PAGER=cat`, `GIT_PAGER=cat`, `PIER=1`,
@@ -978,21 +985,111 @@ The Variables and Credentials groups stay the same under any of them.
     and fails with `inheritEnv: true`, as the check did.
 - **Claude Code's own environment** stays the daemon's (pi-claude-code's
   `claudeEnvironment`). It's the provider's, not a tool's, so it's outside the contract.
-- **Not yet checked:** the steamdeck, as `willy` (offline); a conversation's `cwd`
-  changed with `configure`, and Claude Code's warm process after it; how the keyring's
-  agent behaves when a tool reaches it by path and the key is locked.
+- **Not yet checked:** the steamdeck, as `willy` (offline); how the keyring's agent
+  behaves when a tool reaches it by path while the key is locked (it hung once, and
+  authenticated once the key was unlocked). A change of `cwd` and Claude Code's warm
+  process after it were checked on 2026-11-24 ("What /cd does to the model").
 
 ## Open questions for Will
 
-None left from the drafts of 2026-11-24. What remains is the plan: the order to build
-the contract in, with `todos/remote.md`.
+None left from the drafts of 2026-11-24.
+
+## Plan
+
+Written 2026-11-24 for the session that builds this. Claude's ordering, not Will's
+decision; each step stands on its own and leaves pier working. Facts below are pier at
+0.7.0 (`main` at `7dc5aef`).
+
+1. **The daemon's YAML config** (decided; "d. The service and the daemon").
+   - `$XDG_CONFIG_HOME/pier/config.yaml` (or `$PIER_CONFIG`), read once at start,
+     parsed with the `yaml` package (in the tree through pi-coding-agent at 2.9.0;
+     make it a direct, exact dependency), and checked against a `pi-schema` schema, as
+     `src/host/protocol.ts` checks requests. A missing file is an empty config; an
+     invalid one stops the daemon with the path and the error, as a bad `PIER_MODEL`
+     does now (`src/host/defaults.ts`).
+   - It holds what the environment variables hold today (`model`, `thinking`,
+     `skills`), with `PIER_*` overriding, plus the new keys the later steps need
+     (`tools.variables` for agent settings, `tools.timeout`). Keep the first version
+     to what steps 1 to 4 use.
+   - The daemon logs what it read, as it logs `skills` now (`src/host/cli.ts`).
+   - Dotfiles' `modules/pi/pier.nix` writes it later, with `pkgs.formats.yaml`. That's
+     a change in another repository, so Will's to OK.
+2. **The contract's variables for every tool call** ("The contract, grouped"; "How
+   each part is provided"; "Checked by running").
+   - Base: the user's login shell (`getent passwd`, by absolute path) run as
+     `<shell> -lc 'env -0'` from `{ HOME, USER }`, filtered to the base list, once at the
+     daemon's start.
+   - Project: `direnv export json` in the conversation's directory, given the *whole*
+     login environment (not the filtered base: it's a diff), cached per directory,
+     refreshed when a file in `DIRENV_WATCHES` changes; evaluated in the background so
+     a call never waits on a build. A project's `.env` passes as it is (Will's axiom).
+   - Agent settings from the config; `PIER=1`, and `PIER_CONVERSATION`.
+   - Delivered through bash's `prepare` hook (`createBashTool({ prepare })` replacing
+     `CodingTools`' bash), with `inheritEnv: false` and the variables in the call's
+     `env`, **not** `NodeExecutionEnv`'s `shellEnv`, which `inheritEnv: false` drops
+     (checked).
+   - Remove `pier.client-env` (`ClientEnvDoc` in `src/host/daemon.ts`) and `attach`'s
+     `env` (`src/host/protocol.ts`, and the client's `environment()` in
+     `src/host/cli.ts`). That's a protocol change: bump `PROTOCOL_VERSION`. Old stored
+     `pier.client-env` documents are simply no longer read.
+   - Test, over a real socket with the faux model: a variable set only in the daemon's
+     process, and one sent by a pane, don't reach a tool; a project's direnv variable
+     does. Then disable the change and watch the test fail (`docs/principles.md`, 5).
+   - Shape it for the layer (`src/layer/`): the contract, the probe and the direnv
+     source are what p3 would need; the daemon only wires them.
+   - Then run `experiments/environment/contract-check.mjs` again, and a day of daily use,
+     before the next step. Record anything a command lacked.
+3. **Telling the model about secrets** (decided; "Telling the model").
+   - A prompt section, present when the project's variables include a `.env`'s, naming
+     those variables (never values), and pointing to the skill.
+   - A skill, offered with pier's own (a directory of pier's added to the skills
+     extension), with the guidance listed there.
+   - An `afterTool` hook replacing any of those values in a tool's result with
+     `[redacted: NAME]`. Test it with a faux tool that prints a secret.
+   - Layer code.
+4. **`/cd`, and the date** (decided: option a; "What can be overridden").
+   - `/cd <dir>` in the TUI: a protocol request that checks the directory exists on the
+     daemon's machine, `configure({ cwd })`, and adds Claude Code's own wording to the
+     conversation: `# Environment update` / `Primary working directory: <new> (was
+     <old>)`. Where the note goes (a `SystemEntry` with content, or an `instructions`
+     change) is the builder's to measure: `experiments/cwd/act.ts`'s `note` variant used
+     `instructions`.
+   - The date: on a conversation's first request of a day, when pi-claude-code's
+     recorded block names an earlier date, add `# Environment update` / `The date has
+     changed. Today's date is now <date>.` Fixes every conversation, not only `/cd`.
+   - Check with `experiments/cwd/act.ts` (a few Opus turns, so ask Will first), and
+     with offline tests for the protocol and the note.
+   - A model-facing `cd` tool is not in this plan (Will: not for every conversation).
+5. **Credentials** wait for their own spec (`todos/credentials.md`): the principles are
+   settled; its design questions come next, then the agents' GitHub token as the first
+   credential (decided). Until then tools have no credentials but what their reach
+   gives them (`SSH_AUTH_SOCK` is no longer passed; a key unlocked in the keyring is
+   still usable by path, as checked).
+
+What changes for Will on step 2's day, worth telling him before it lands:
+
+- **`git push` from a conversation stops working** unless a credential reaches it. pier
+  pushes to `git@github.com:DArtagan/pier.git` over SSH, and today that works only
+  because the pane's `SSH_AUTH_SOCK` is passed through. Either keep passing
+  `SSH_AUTH_SOCK` as an agent setting until the GitHub token exists (one config line;
+  his call), or switch the remote to HTTPS with the token (`gh`'s `git_protocol` is
+  already `https`).
+- **A `nix shell` or `export` in a pane** no longer reaches the tools; put it in the
+  project's `.envrc` or the config.
+
+When the plan is done: the contract goes in `README.md`, `docs/history.md` records the
+reversal of 2026-10-29, `todos/remote.md` is refreshed from what was built (its
+component 4 is this spec), and this file is deleted.
 
 Deferred to implementation (Will, 2026-11-24): which machines and users an agent's SSH
 key reaches.
 
 ## Done when
 
-Every conversation's tools run with exactly the contract's parts, local and remote, and
-a test shows a variable set only in a pane doesn't reach a tool. Then the contract goes
-in `README.md`, `docs/history.md` records the reversal of 2026-10-29, and this file is
-deleted.
+Steps 1 to 4 of the plan are built: every conversation's tools run with exactly the
+contract's variables, a test shows a variable set only in a pane doesn't reach a tool
+(and fails without the change), the model is told of a project's secrets and they're
+redacted from tool results, and `/cd` and a new day each add their note. Then the
+contract goes in `README.md`, `docs/history.md` records the reversal of 2026-10-29,
+`todos/remote.md` is refreshed from it, and this file is deleted. Credentials (step 5)
+carry on in `todos/credentials.md`.

@@ -2,13 +2,19 @@
 
 ## Opening prompt
 
-> Read `docs/vision.md`, `docs/principles.md`, then `todos/remote.md`. Will has decided
-> the model (remote attach), the transport (SSH) and the scope (both directions, each
-> host its own conversations, a list across hosts, starting conversations on another
-> host, `pier --connect` remembering hosts). The components below each have options and
-> a proposal; settle the open questions with Will before building, record his answers
-> here verbatim and dated, then build in the order under "Plan". Keep it thin: this is
-> host code, replaced when p3 takes over.
+> **Not ready to build yet.** Will, 2026-11-24: *"I'm going to start by first
+> implementing the environment work, and then using that to refresh the remote.md spec
+> - before beginning work on it."* So first `todos/environment.md` is built; then this
+> spec is refreshed from what was built (component 4 and the hazard in "pier's client
+> and protocol" become what the contract does), and only then is this built.
+>
+> When refreshing: read `docs/vision.md`, `docs/principles.md`, then this file. Will
+> has decided the model (remote attach), the transport (SSH, run by each client), and
+> the scope (both directions, each host its own conversations, a list across hosts,
+> starting conversations on another host, `pier connect` remembering piers, which name
+> themselves). Re-check what changed upstream and in p3 since 2026-11-24. Write the
+> "Plan", settle what's still open with Will, record his answers here verbatim and
+> dated, then build. Keep it thin: this is host code, replaced when p3 takes over.
 
 Written 2026-11-17, from that day's conversation. Will's opening: *"remote control of
 pier by other devices. I have a few machines (thenixbeast, steamdeck) and I'll be running
