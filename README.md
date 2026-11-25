@@ -121,6 +121,9 @@ refuses to start with a model it can't run, or a thinking level that isn't pi's.
   each step in its own process so it can be killed.
 - `experiments/wire/` measures what a conversation watch sends.
 - `experiments/transcript/` measures the terminal client with a long transcript.
+- `experiments/environment/` runs tool commands as the environment contract would
+  (`todos/environment.md`), outside any terminal: what works, what's kept out
+  (`contract-check.mjs`), and what a tool can still reach as you (`authority-check.mjs`).
 - `experiments/cwd/` studies Claude Code's environment block: what it says under
   different directories and flags, against a stub API (`env-block.ts`); and, with real
   Claude, what a change of directory or model does to it, to the prompt cache, and to
