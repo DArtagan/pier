@@ -6,8 +6,9 @@
 //   pier list [--all]    conversations here (or everywhere), newest first
 //   pier daemon          run the daemon in the foreground
 // The client runs fullscreen; `--tui-mode regular` keeps the terminal's scrollback, as in pi.
-// The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock. The daemon offers the
-// skills under $PIER_SKILLS (`:`-separated) beside each project's own.
+// The socket is $PIER_SOCKET, or $XDG_RUNTIME_DIR/pier/pier.sock. The daemon reads its
+// configuration from $PIER_CONFIG, or $XDG_CONFIG_HOME/pier/config.yaml (config.ts), and
+// offers the skills it names, or $PIER_SKILLS (`:`-separated), beside each project's own.
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -17,6 +18,7 @@ import { createPrompt } from "../layer/prompt.ts";
 import { createSkills } from "../layer/skills.ts";
 import { PierClient } from "./client.ts";
 import { activity } from "./commands.ts";
+import { configPath, describeConfig, readConfig } from "./config.ts";
 import { startDaemon } from "./daemon.ts";
 import { defaultModel, defaultThinkingLevel } from "./defaults.ts";
 import { skillPaths, socketPath, stateDir } from "./paths.ts";
@@ -110,11 +112,13 @@ function environment(): Record<string, string> {
 
 async function daemon(): Promise<number> {
 	const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
-	// Read first, so a mistake in either stops the daemon before it does anything.
-	const model = defaultModel();
-	const thinkingLevel = defaultThinkingLevel();
+	// Read first, so a mistake in any of them stops the daemon before it does anything.
+	const configFile = configPath();
+	const config = await readConfig(configFile);
+	const model = defaultModel(process.env, config);
+	const thinkingLevel = defaultThinkingLevel(process.env, config);
 	const state = stateDir();
-	const skills = skillPaths();
+	const skills = skillPaths(process.env, config);
 	await mkdir(state, { recursive: true, mode: 0o700 });
 	// pi-claude-code runs Claude Code in the conversation's directory (ConversationDirectories),
 	// and in this process's otherwise, telling the model about it, git status included. The
@@ -131,6 +135,7 @@ async function daemon(): Promise<number> {
 		extensions: [createPrompt(), createSkills({ paths: skills })],
 		log,
 	});
+	log(`config ${configFile}: ${describeConfig(config)}`);
 	log(`storage ${join(state, "pier.sqlite")}`);
 	log(`skills ${skills.length === 0 ? "(none beyond projects')" : skills.join(" ")}`);
 	const stop = () => void running.close();
